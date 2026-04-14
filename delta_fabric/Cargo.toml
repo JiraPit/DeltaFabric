@@ -1,0 +1,18 @@
+[package]
+name = "delta_fabric"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+burn = "0.20.1"
+rkyv = "0.8.15"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.52.0", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+zenoh = "1.9.0"
+
+[dev-dependencies]
+burn-ndarray = "0.20.1"
