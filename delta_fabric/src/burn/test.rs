@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod burn_tests {
     use crate::burn::{flatten_burn_model, unflatten_burn_model};
     use burn::nn::Linear;
     use burn::nn::LinearConfig;

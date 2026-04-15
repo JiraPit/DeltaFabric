@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod test {
+mod config_tests {
     use crate::core::FabricConfig;
 
     #[test]

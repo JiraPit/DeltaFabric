@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod test {
+mod sync_tests {
     use crate::core::packet::{FabricPacket, SparseDelta};
     use crate::core::sync::{apply_deltas, generate_local_delta, process_deltas};
     use std::collections::HashMap;

@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod networking_tests {
     #[test]
     fn test_node_state_serialization() {
         use super::*;

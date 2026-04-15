@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod test {
+mod packet_tests {
     use crate::core::{FabricPacket, SparseDelta};
     use rkyv::{api::high::to_bytes_with_alloc, deserialize, ser::allocator::Arena};
     use std::collections::HashMap;
