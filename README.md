@@ -10,7 +10,7 @@ Eliminates master-server bottlenecks by letting every node participate equally i
 
 ### Built-in Networking and Automatic Peer Discovery
 
-We include a built-in networking layer powered by the [ zenoh ] P2P protocol. Nodes discover peers and exchange deltas automatically without external coordination or central server.
+We include a built-in networking layer powered by the `zenoh` P2P protocol. Nodes discover peers and exchange deltas automatically without external coordination or central server.
 
 ### Anchor-Active Weight Model
 
