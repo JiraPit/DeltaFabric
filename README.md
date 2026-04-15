@@ -1,6 +1,6 @@
 # DeltaFabric
 
-A decentralized, gossip-based synchronization protocol for distributed ML training.
+A decentralized weight synchronization protocol for distributed ML training with built-in networking, currently supporting PyTorch and Burn.
 
 ## Core Concepts
 
@@ -24,4 +24,3 @@ We include a built-in networking layer powered by the [ zenoh ] P2P protocol. No
 ### Keyed Delta Propagation
 
 Each delta in a packet is tagged with an originator ID and sequence number. This enables any node to relay updates without creating feedback loops, a node only processes a delta if its sequence number exceeds the last seen value for that originator.
-
