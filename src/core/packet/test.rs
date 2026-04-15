@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod packet_tests {
-    use crate::core::{FabricPacket, SparseDelta};
+    use crate::core::{DeltaPacket, SparseDelta};
     use rkyv::{api::high::to_bytes_with_alloc, deserialize, ser::allocator::Arena};
     use std::collections::HashMap;
 
     #[test]
     fn test_fabric_packet_roundtrip() {
-        let packet = FabricPacket {
+        let packet = DeltaPacket {
             updates: HashMap::from([(
                 1,
                 SparseDelta {
@@ -22,9 +22,9 @@ mod packet_tests {
             to_bytes_with_alloc::<_, rkyv::rancor::Error>(&packet, arena.acquire()).unwrap();
 
         let archived =
-            rkyv::access::<rkyv::Archived<FabricPacket>, rkyv::rancor::Error>(&bytes[..]).unwrap();
-        let deserialized: FabricPacket =
-            deserialize::<FabricPacket, rkyv::rancor::Error>(archived).unwrap();
+            rkyv::access::<rkyv::Archived<DeltaPacket>, rkyv::rancor::Error>(&bytes[..]).unwrap();
+        let deserialized: DeltaPacket =
+            deserialize::<DeltaPacket, rkyv::rancor::Error>(archived).unwrap();
 
         assert_eq!(packet, deserialized);
     }

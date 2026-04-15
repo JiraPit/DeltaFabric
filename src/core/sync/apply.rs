@@ -1,10 +1,10 @@
-use crate::core::packet::{FabricPacket, SparseDelta};
+use crate::core::packet::{ArchivedDeltaPacket, SparseDelta};
 use std::collections::HashMap;
 use tracing::{debug, trace};
 
 pub fn process_deltas(
     aggregator: &mut HashMap<u32, f32>,
-    incoming: &FabricPacket,
+    incoming: &ArchivedDeltaPacket,
     seen_table: &mut HashMap<u64, u64>,
     alpha: f32,
     relay_threshold: f32,
@@ -14,17 +14,20 @@ pub fn process_deltas(
     let mut stale_count = 0;
 
     for (origin_id, delta) in incoming.updates.iter() {
-        let last_seq = seen_table.get(origin_id).copied().unwrap_or(0);
+        let origin_id: u64 = (*origin_id).into();
+        let last_seq = seen_table.get(&origin_id).copied().unwrap_or(0);
+        let seq_id: u64 = delta.sequence_id.into();
 
-        if delta.sequence_id > last_seq {
+        if seq_id > last_seq {
             fresh_count += 1;
-            seen_table.insert(*origin_id, delta.sequence_id);
-            trace!(origin_id = %origin_id, seq = %delta.sequence_id, "Processing fresh delta");
+            seen_table.insert(origin_id, seq_id);
+            trace!(origin_id = %origin_id, seq = %seq_id, "Processing fresh delta");
 
             let mut relay_indices = Vec::new();
             let mut relay_values = Vec::new();
 
             for (i, &idx) in delta.indices.iter().enumerate() {
+                let idx: u32 = idx.into();
                 let val = delta.values[i];
                 let damped_val = val * alpha;
 
@@ -38,9 +41,9 @@ pub fn process_deltas(
 
             if !relay_indices.is_empty() {
                 relay_updates.insert(
-                    *origin_id,
+                    origin_id,
                     SparseDelta {
-                        sequence_id: delta.sequence_id,
+                        sequence_id: seq_id,
                         indices: relay_indices,
                         values: relay_values,
                     },
@@ -48,7 +51,7 @@ pub fn process_deltas(
             }
         } else {
             stale_count += 1;
-            trace!(origin_id = %origin_id, seq = %delta.sequence_id, last_seq = %last_seq, "Skipping stale delta");
+            trace!(origin_id = %origin_id, seq = %seq_id, last_seq = %last_seq, "Skipping stale delta");
         }
     }
 

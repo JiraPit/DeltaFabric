@@ -4,7 +4,7 @@ use tracing::{debug, trace};
 pub fn generate_local_delta(
     active: &[f32],
     anchor: &mut [f32],
-    top_k_pct: f32,
+    delta_selection_ratio: f32,
     _my_id: u64,
     seq: u64,
 ) -> Option<SparseDelta> {
@@ -17,7 +17,7 @@ pub fn generate_local_delta(
 
     deltas.sort_unstable_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
 
-    let k = (active.len() as f32 * top_k_pct).ceil() as usize;
+    let k = (active.len() as f32 * delta_selection_ratio).ceil() as usize;
     let top_k = &deltas[..k.min(deltas.len())];
 
     let mut indices = Vec::new();

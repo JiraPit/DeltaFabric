@@ -1,32 +1,32 @@
 #[derive(Debug, Clone, PartialEq)]
-pub struct FabricConfig {
+pub struct Config {
     pub alpha: f32,
-    pub top_k_pct: f32,
+    pub delta_selection_ratio: f32,
     pub sync_interval: u64,
     pub relay_threshold: f32,
-    pub expected_peers: Vec<u64>,
+    pub peers: Vec<u64>,
 }
 
-impl Default for FabricConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
             alpha: 0.5,
-            top_k_pct: 0.01,
+            delta_selection_ratio: 0.01,
             sync_interval: 100,
             relay_threshold: 1e-6,
-            expected_peers: vec![],
+            peers: vec![],
         }
     }
 }
 
-impl FabricConfig {
+impl Config {
     pub fn alpha(mut self, alpha: f32) -> Self {
         self.alpha = alpha;
         self
     }
 
-    pub fn top_k_pct(mut self, top_k_pct: f32) -> Self {
-        self.top_k_pct = top_k_pct;
+    pub fn delta_selection_ratio(mut self, delta_selection_ratio: f32) -> Self {
+        self.delta_selection_ratio = delta_selection_ratio;
         self
     }
 
@@ -40,8 +40,8 @@ impl FabricConfig {
         self
     }
 
-    pub fn expected_peers(mut self, expected_peers: Vec<u64>) -> Self {
-        self.expected_peers = expected_peers;
+    pub fn peers(mut self, peers: Vec<u64>) -> Self {
+        self.peers = peers;
         self
     }
 }

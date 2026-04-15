@@ -6,7 +6,7 @@ mod networking_tests {
         use serde_json;
 
         let state = NodeState {
-            expected_peers: vec![1, 2, 3],
+            peers: vec![1, 2, 3],
             status: "READY".to_string(),
         };
 

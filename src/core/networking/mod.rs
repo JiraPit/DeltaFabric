@@ -9,14 +9,14 @@ use zenoh::Session as ZenohSession;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NodeState {
-    pub expected_peers: Vec<u64>,
+    pub peers: Vec<u64>,
     pub status: String,
 }
 
 #[derive(Clone, Debug)]
 pub struct Node {
     pub id: u64,
-    pub expected_peers: Vec<u64>,
+    pub peers: Vec<u64>,
 }
 
 pub struct Session {
@@ -42,7 +42,7 @@ impl Session {
         })
     }
 
-    pub async fn init_cluster(&mut self) -> Result<()> {
+    pub async fn init_fabric(&mut self) -> Result<()> {
         let my_topic = format!("node/{}/state", self.node.id);
         let publisher = self
             .zenoh
@@ -56,7 +56,7 @@ impl Session {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to declare state subscriber: {}", e))?;
 
-        info!(node_id = %self.node.id, peers = ?self.node.expected_peers, "Starting cluster initialization");
+        info!(node_id = %self.node.id, peers = ?self.node.peers, "Starting cluster initialization");
 
         let mut known_states: HashMap<u64, NodeState> = HashMap::new();
         let mut global_nodes: HashSet<u64> = HashSet::new();
@@ -64,7 +64,7 @@ impl Session {
 
         loop {
             let my_state = NodeState {
-                expected_peers: self.node.expected_peers.clone(),
+                peers: self.node.peers.clone(),
                 status: if is_ready { "READY" } else { "DISCOVERING" }.to_string(),
             };
 
@@ -105,7 +105,7 @@ impl Session {
                 if state.status == "OFFLINE" {
                     continue;
                 }
-                for &peer in &state.expected_peers {
+                for &peer in &state.peers {
                     edges.entry(id).or_default().insert(peer);
                     edges.entry(peer).or_default().insert(id);
                 }
@@ -158,7 +158,7 @@ impl Session {
         );
 
         let samples_ref = self.delta_samples.clone();
-        for peer_id in &self.node.expected_peers {
+        for peer_id in &self.node.peers {
             let samples = samples_ref.clone();
             self.zenoh
                 .declare_subscriber(format!("node/{}/delta", peer_id))
@@ -190,12 +190,12 @@ impl Session {
         samples
     }
 
-    pub async fn broadcast(&self, packet: crate::core::packet::FabricPacket) -> Result<()> {
+    pub async fn broadcast(&self, packet: crate::core::packet::DeltaPacket) -> Result<()> {
         use rkyv::{api::high::to_bytes_with_alloc, ser::allocator::Arena};
 
         let mut arena = Arena::new();
         let bytes = to_bytes_with_alloc::<_, rkyv::rancor::Error>(&packet, arena.acquire())
-            .context("Serialization of FabricPacket failed")?;
+            .context("Serialization of DeltaPacket failed")?;
 
         if let Some(publ) = &self.delta_publisher {
             publ.put(bytes.to_vec())
@@ -208,7 +208,7 @@ impl Session {
 
     pub async fn shutdown(&mut self) -> Result<()> {
         let state = NodeState {
-            expected_peers: self.node.expected_peers.clone(),
+            peers: self.node.peers.clone(),
             status: "OFFLINE".to_string(),
         };
 

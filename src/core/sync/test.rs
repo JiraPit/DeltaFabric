@@ -1,13 +1,14 @@
 #[cfg(test)]
 mod sync_tests {
-    use crate::core::packet::{FabricPacket, SparseDelta};
+    use crate::core::packet::{DeltaPacket, SparseDelta};
     use crate::core::sync::{apply_deltas, generate_local_delta, process_deltas};
+    use rkyv::{api::high::to_bytes_with_alloc, ser::allocator::Arena};
     use std::collections::HashMap;
 
     #[test]
     fn test_generate_local_delta_empty() {
         let active = vec![0.0, 0.0, 0.0];
-        let mut anchor = vec![0.0, 0.0, 0.0];
+        let mut anchor = vec![0.0; 5];
 
         let result = generate_local_delta(&active, &mut anchor, 0.1, 1, 1);
         assert!(result.is_none());
@@ -57,7 +58,7 @@ mod sync_tests {
 
     #[test]
     fn test_process_deltas_fresh_delta() {
-        let incoming = FabricPacket {
+        let packet = DeltaPacket {
             updates: HashMap::from([(
                 1,
                 SparseDelta {
@@ -67,10 +68,14 @@ mod sync_tests {
                 },
             )]),
         };
+        let bytes =
+            to_bytes_with_alloc::<_, rkyv::rancor::Error>(&packet, Arena::new().acquire()).unwrap();
+        let archived = crate::core::access_archived_packet(&bytes).unwrap();
+
         let mut aggregator: HashMap<u32, f32> = HashMap::new();
         let mut seen_table: HashMap<u64, u64> = HashMap::new();
 
-        let relay = process_deltas(&mut aggregator, &incoming, &mut seen_table, 1.0, 0.0);
+        let relay = process_deltas(&mut aggregator, archived, &mut seen_table, 1.0, 0.0);
 
         assert!(relay.is_some());
         assert_eq!(seen_table.get(&1), Some(&10));
@@ -80,7 +85,7 @@ mod sync_tests {
 
     #[test]
     fn test_process_deltas_stale_delta() {
-        let incoming = FabricPacket {
+        let packet = DeltaPacket {
             updates: HashMap::from([(
                 1,
                 SparseDelta {
@@ -90,10 +95,14 @@ mod sync_tests {
                 },
             )]),
         };
+        let bytes =
+            to_bytes_with_alloc::<_, rkyv::rancor::Error>(&packet, Arena::new().acquire()).unwrap();
+        let archived = crate::core::access_archived_packet(&bytes).unwrap();
+
         let mut aggregator: HashMap<u32, f32> = HashMap::new();
         let mut seen_table: HashMap<u64, u64> = HashMap::from([(1, 10)]);
 
-        let relay = process_deltas(&mut aggregator, &incoming, &mut seen_table, 1.0, 0.0);
+        let relay = process_deltas(&mut aggregator, archived, &mut seen_table, 1.0, 0.0);
 
         assert!(relay.is_none());
         assert!(aggregator.is_empty());
@@ -102,7 +111,7 @@ mod sync_tests {
 
     #[test]
     fn test_process_deltas_threshold() {
-        let incoming = FabricPacket {
+        let packet = DeltaPacket {
             updates: HashMap::from([(
                 1,
                 SparseDelta {
@@ -112,10 +121,14 @@ mod sync_tests {
                 },
             )]),
         };
+        let bytes =
+            to_bytes_with_alloc::<_, rkyv::rancor::Error>(&packet, Arena::new().acquire()).unwrap();
+        let archived = crate::core::access_archived_packet(&bytes).unwrap();
+
         let mut aggregator: HashMap<u32, f32> = HashMap::new();
         let mut seen_table: HashMap<u64, u64> = HashMap::new();
 
-        let relay = process_deltas(&mut aggregator, &incoming, &mut seen_table, 1.0, 0.5);
+        let relay = process_deltas(&mut aggregator, archived, &mut seen_table, 1.0, 0.5);
 
         assert!(relay.is_some());
         let relay_updates = relay.unwrap();

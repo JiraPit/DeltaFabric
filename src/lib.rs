@@ -4,8 +4,8 @@ pub mod core;
 use anyhow::{Context, Result};
 pub use burn::Fabric;
 pub use core::{
-    ArchivedFabricPacketType, FabricConfig, FabricPacket, Node, NodeState, Session, SparseDelta,
-    process_deltas,
+    ArchivedDeltaPacket, Config, DeltaPacket, Node, NodeState, Session, SparseDelta,
+    access_archived_packet, process_deltas,
 };
 pub mod prelude {
     pub use anyhow::{Context, Result};

@@ -2,7 +2,7 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Archive, Serialize, Deserialize, PartialEq, Debug)]
-pub struct FabricPacket {
+pub struct DeltaPacket {
     pub updates: HashMap<u64, SparseDelta>,
 }
 
@@ -13,7 +13,11 @@ pub struct SparseDelta {
     pub values: Vec<f32>,
 }
 
-pub type ArchivedFabricPacketType = <FabricPacket as Archive>::Archived;
+pub fn access_archived_packet<'a>(
+    bytes: &'a [u8],
+) -> Result<&'a ArchivedDeltaPacket, rkyv::rancor::Error> {
+    rkyv::access::<ArchivedDeltaPacket, rkyv::rancor::Error>(bytes)
+}
 
 #[cfg(test)]
 mod test;

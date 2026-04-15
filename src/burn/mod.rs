@@ -5,9 +5,10 @@ pub mod unflatten;
 mod test;
 
 use crate::core::{
-    config::FabricConfig,
+    access_archived_packet,
+    config::Config,
     networking::Session,
-    packet::{FabricPacket, SparseDelta},
+    packet::{DeltaPacket, SparseDelta},
     sync::{apply_deltas, generate_local_delta, process_deltas},
 };
 use anyhow::{Context, Result};
@@ -22,7 +23,7 @@ pub use unflatten::unflatten_burn_model;
 
 pub struct Fabric<B: Backend> {
     pub session: Session,
-    pub config: FabricConfig,
+    pub config: Config,
     pub anchor_weights: Vec<f32>,
     pub seen_table: HashMap<u64, u64>,
     pub local_sequence: u64,
@@ -30,12 +31,12 @@ pub struct Fabric<B: Backend> {
 }
 
 impl<B: Backend> Fabric<B> {
-    pub async fn new(node_id: u64, config: FabricConfig) -> Result<Self> {
+    pub async fn new(node_id: u64, config: Config) -> Result<Self> {
         info!(node_id = %node_id, "Initializing DeltaFabric");
 
         let node = crate::core::networking::Node {
             id: node_id,
-            expected_peers: config.expected_peers.clone(),
+            peers: config.peers.clone(),
         };
 
         let mut session = Session::new(node)
@@ -43,9 +44,9 @@ impl<B: Backend> Fabric<B> {
             .context("Failed to create session")?;
 
         session
-            .init_cluster()
+            .init_fabric()
             .await
-            .context("Failed to initialize cluster")?;
+            .context("Failed to initialize fabric")?;
 
         info!(node_id = %node_id, "DeltaFabric initialized successfully");
 
@@ -76,7 +77,7 @@ impl<B: Backend> Fabric<B> {
 
         for sample in self.session.pull_packets() {
             let payload = sample.payload().to_bytes();
-            match rkyv::from_bytes::<FabricPacket, rkyv::rancor::Error>(&payload) {
+            match access_archived_packet(&payload) {
                 Ok(incoming) => {
                     if let Some(updates) = process_deltas(
                         &mut aggregator,
@@ -110,7 +111,7 @@ impl<B: Backend> Fabric<B> {
             if let Some(delta) = generate_local_delta(
                 &active_flat,
                 &mut self.anchor_weights,
-                self.config.top_k_pct,
+                self.config.delta_selection_ratio,
                 self.session.node.id,
                 self.local_sequence,
             ) {
@@ -125,7 +126,7 @@ impl<B: Backend> Fabric<B> {
         }
 
         if !relay_updates.is_empty() {
-            let packet = FabricPacket {
+            let packet = DeltaPacket {
                 updates: relay_updates,
             };
             self.session
