@@ -1,6 +1,6 @@
 # DeltaFabric
 
-A decentralized weight synchronization protocol for distributed ML training with built-in networking, currently supporting PyTorch and Burn.
+A decentralized weight synchronization protocol for distributed ML training with built-in networking. Currently supporting PyTorch and Burn.
 
 ## Core Concepts
 
