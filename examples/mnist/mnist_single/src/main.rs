@@ -12,6 +12,7 @@ use mnist_shared::{MnistBatch, Model};
 const BATCH_SIZE: usize = 32;
 const EPOCHS: usize = 5;
 const LEARNING_RATE: f64 = 0.01;
+const TRAIN_SAMPLES: usize = 6000;
 
 pub fn init_tracing() {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -74,7 +75,7 @@ pub fn train<B: AutodiffBackend>(
     let mut optimizer = config.init();
 
     for epoch in 0..num_epochs {
-        let num_batches = dataset.len() / BATCH_SIZE;
+        let num_batches = TRAIN_SAMPLES / BATCH_SIZE;
         let mut total_loss: f64 = 0.0;
 
         for batch_idx in 0..num_batches {
@@ -95,7 +96,7 @@ pub fn train<B: AutodiffBackend>(
 }
 
 pub fn accuracy<B: Backend>(model: &Model<B>, dataset: &MnistDataset, device: &B::Device) -> f64 {
-    let num_batches = dataset.len() / BATCH_SIZE;
+    let num_batches = TRAIN_SAMPLES / BATCH_SIZE;
     let mut correct = 0usize;
 
     for batch_idx in 0..num_batches {

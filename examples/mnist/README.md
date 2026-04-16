@@ -86,19 +86,27 @@ fabric.shutdown().await?;
 
 ## Data Split
 
+Training uses 10% of MNIST (6,000 samples) for faster CPU training.
+
+### Single Node
+
+| Total Samples |
+|---------------|
+| 6,000 |
+
 ### 2 Nodes
 
-Each node trains on 50% of MNIST:
+Each node trains on 3,000 samples:
 | Node | Samples |
 |------|---------|
-| 1 | 0 - 29,999 |
-| 2 | 30,000 - 59,999 |
+| 1 | 0 - 2,999 |
+| 2 | 3,000 - 5,999 |
 
 ### 3 Nodes
 
-Each node trains on ~33% of MNIST:
+Each node trains on 2,000 samples:
 | Node | Samples |
 |------|---------|
-| 1 | 0 - 19,999 |
-| 2 | 20,000 - 39,999 |
-| 3 | 40,000 - 59,999 |
+| 1 | 0 - 1,999 |
+| 2 | 2,000 - 3,999 |
+| 3 | 4,000 - 5,999 |

@@ -18,6 +18,7 @@ const LEARNING_RATE: f64 = 0.01;
 
 const NUM_NODES: usize = 2;
 const TRAIN_SAMPLES: usize = 60000;
+const TRAIN_SAMPLES_PER_NODE: usize = 3000;
 
 pub fn init_tracing() {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -39,9 +40,8 @@ fn parse_peers(peers_str: &str) -> Vec<u64> {
 }
 
 fn get_partition_range(node_id: u64) -> (usize, usize) {
-    let samples_per_node = TRAIN_SAMPLES / NUM_NODES;
-    let start = ((node_id - 1) as usize) * samples_per_node;
-    let end = start + samples_per_node;
+    let start = ((node_id - 1) as usize) * TRAIN_SAMPLES_PER_NODE;
+    let end = start + TRAIN_SAMPLES_PER_NODE;
     (start, end)
 }
 
@@ -52,11 +52,11 @@ pub fn load_batch<B: Backend>(
     device: &B::Device,
 ) -> Option<MnistBatch<B>> {
     let start = partition_start + batch_idx * BATCH_SIZE;
-    if start >= partition_start + 30000 {
+    if start >= partition_start + TRAIN_SAMPLES_PER_NODE {
         return None;
     }
 
-    let end = (start + BATCH_SIZE).min(partition_start + 30000);
+    let end = (start + BATCH_SIZE).min(partition_start + TRAIN_SAMPLES_PER_NODE);
     let mut images = Vec::new();
     let mut targets = Vec::new();
 
@@ -94,8 +94,7 @@ pub async fn train<B: AutodiffBackend>(
     device: &B::Device,
     fabric: &mut Fabric,
 ) -> Result<(Model<B>, f64)> {
-    let samples_per_node = 30000;
-    let num_batches = samples_per_node / BATCH_SIZE;
+    let num_batches = TRAIN_SAMPLES_PER_NODE / BATCH_SIZE;
     let mut total_loss: f64 = 0.0;
     let mut optimizer = SgdConfig::new().init();
 
@@ -125,8 +124,7 @@ pub fn accuracy<B: Backend>(
     partition_start: usize,
     device: &B::Device,
 ) -> f64 {
-    let samples_per_node = 30000;
-    let num_batches = samples_per_node / BATCH_SIZE;
+    let num_batches = TRAIN_SAMPLES_PER_NODE / BATCH_SIZE;
     let mut correct = 0usize;
 
     for batch_idx in 0..num_batches {
@@ -198,7 +196,7 @@ async fn main() -> Result<()> {
 
     tracing::info!(
         test_samples = %test_dataset.len(),
-        partition_samples = %30000,
+        partition_samples = %TRAIN_SAMPLES_PER_NODE,
         "Datasets loaded"
     );
 

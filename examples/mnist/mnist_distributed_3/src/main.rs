@@ -18,6 +18,7 @@ const LEARNING_RATE: f64 = 0.01;
 
 const NUM_NODES: usize = 3;
 const TRAIN_SAMPLES: usize = 60000;
+const TRAIN_SAMPLES_PER_NODE: usize = 2000;
 
 pub fn init_tracing() {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -39,9 +40,8 @@ fn parse_peers(peers_str: &str) -> Vec<u64> {
 }
 
 fn get_partition_range(node_id: u64) -> (usize, usize) {
-    let samples_per_node = TRAIN_SAMPLES / NUM_NODES;
-    let start = ((node_id - 1) as usize) * samples_per_node;
-    let end = start + samples_per_node;
+    let start = ((node_id - 1) as usize) * TRAIN_SAMPLES_PER_NODE;
+    let end = start + TRAIN_SAMPLES_PER_NODE;
     (start, end)
 }
 

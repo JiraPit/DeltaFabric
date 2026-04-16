@@ -66,11 +66,9 @@ impl<B: Backend> ConvBlock<B> {
 pub struct Model<B: Backend> {
     conv1: ConvBlock<B>,
     conv2: ConvBlock<B>,
-    dropout: nn::Dropout,
     fc1: nn::Linear<B>,
     fc2: nn::Linear<B>,
-    fc3: nn::Linear<B>,
-    activation: nn::Gelu,
+    activation: nn::Relu,
 }
 
 impl<B: Backend> Default for Model<B> {
@@ -84,23 +82,18 @@ const NUM_CLASSES: usize = 10;
 
 impl<B: Backend> Model<B> {
     pub fn new(device: &B::Device) -> Self {
-        let conv1 = ConvBlock::new([1, 64], [3, 3], device, true);
-        let conv2 = ConvBlock::new([64, 64], [3, 3], device, true);
-        let hidden_size = 64 * 5 * 5;
-        let fc1 = nn::LinearConfig::new(hidden_size, 128).init(device);
-        let fc2 = nn::LinearConfig::new(128, 128).init(device);
-        let fc3 = nn::LinearConfig::new(128, NUM_CLASSES).init(device);
-
-        let dropout = nn::DropoutConfig::new(0.25).init();
+        let conv1 = ConvBlock::new([1, 32], [3, 3], device, true);
+        let conv2 = ConvBlock::new([32, 32], [3, 3], device, true);
+        let hidden_size = 32 * 5 * 5;
+        let fc1 = nn::LinearConfig::new(hidden_size, 64).init(device);
+        let fc2 = nn::LinearConfig::new(64, NUM_CLASSES).init(device);
 
         Self {
             conv1,
             conv2,
-            dropout,
             fc1,
             fc2,
-            fc3,
-            activation: nn::Gelu::new(),
+            activation: nn::Relu::new(),
         }
     }
 
@@ -116,13 +109,8 @@ impl<B: Backend> Model<B> {
 
         let x = self.fc1.forward(x);
         let x = self.activation.forward(x);
-        let x = self.dropout.forward(x);
 
-        let x = self.fc2.forward(x);
-        let x = self.activation.forward(x);
-        let x = self.dropout.forward(x);
-
-        self.fc3.forward(x)
+        self.fc2.forward(x)
     }
 
     pub fn forward_classification(&self, item: MnistBatch<B>) -> ClassificationOutput<B> {
