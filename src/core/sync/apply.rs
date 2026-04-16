@@ -2,6 +2,21 @@ use crate::core::packet::{ArchivedDeltaPacket, SparseDelta};
 use std::collections::HashMap;
 use tracing::{debug, trace};
 
+/// Processes incoming deltas, aggregates them, and prepares relay updates.
+///
+/// Deduplicates based on sequence IDs, applies damping, and filters by threshold.
+///
+/// # Arguments
+///
+/// * `aggregator` - HashMap accumulating delta values (mutated in place)
+/// * `incoming` - Archived DeltaPacket from a peer
+/// * `seen_table` - Tracks last seen sequence per origin (mutated in place)
+/// * `alpha` - Damping factor applied to all values
+/// * `relay_threshold` - Minimum absolute value to include in relay
+///
+/// # Returns
+///
+/// None if no fresh deltas, otherwise HashMap of node IDs to SparseDeltas for relay.
 pub fn process_deltas(
     aggregator: &mut HashMap<u32, f32>,
     incoming: &ArchivedDeltaPacket,
@@ -71,6 +86,13 @@ pub fn process_deltas(
     }
 }
 
+/// Applies aggregated deltas to active and anchor weight vectors.
+///
+/// # Arguments
+///
+/// * `active` - Current model weights (mutated in place)
+/// * `anchor` - Reference weights for delta computation (mutated in place)
+/// * `aggregator` - Map of parameter indices to delta values
 pub fn apply_deltas(active: &mut [f32], anchor: &mut [f32], aggregator: &HashMap<u32, f32>) {
     for (&idx, &delta) in aggregator.iter() {
         active[idx as usize] += delta;

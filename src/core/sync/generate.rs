@@ -1,6 +1,22 @@
 use crate::core::packet::SparseDelta;
 use tracing::{debug, trace};
 
+/// Generates a sparse delta from the difference between active and anchor weights.
+///
+/// Selects the top k parameters by absolute magnitude, where k is determined
+/// by delta_selection_ratio. Updates anchor to match active for selected indices.
+///
+/// # Arguments
+///
+/// * `active` - Current model weights
+/// * `anchor` - Reference weights (mutated in place)
+/// * `delta_selection_ratio` - Fraction of parameters to include
+/// * `_my_id` - Origin node ID (reserved for future use)
+/// * `seq` - Sequence number for ordering
+///
+/// # Returns
+///
+/// None if no significant deltas, otherwise Some(SparseDelta).
 pub fn generate_local_delta(
     active: &[f32],
     anchor: &mut [f32],

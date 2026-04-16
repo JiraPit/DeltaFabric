@@ -4,6 +4,88 @@ This document tracks changes, deviations, and improvements across versions.
 
 ---
 
+## v0.4
+
+### API Simplification
+
+Simplified the DeltaFabric API to reduce user boilerplate:
+
+- **New `Config::new(peers)` constructor**: Creates config with sensible defaults (alpha=0.5, delta_selection_ratio=0.01, sync_interval=100, relay_threshold=1e-6)
+
+- **`Fabric::step()` takes ownership**: Now takes model by value, returns updated model with synced params applied
+
+- **`Fabric` manages step count internally**: No need to pass step_count to `step()`
+
+- **Helper functions**: `extract_params()` and `apply_params()` for working with model parameters
+
+- **Simplified usage**:
+  ```rust
+  use delta_fabric::{Config, Fabric};
+
+  let config = Config::new(peers);
+  let mut fabric = Fabric::new(node_id, config).await?;
+
+  let mut model: Model<Autodiff<NdArray<f32>>> = Model::new(&device);
+  let optimizer = SgdConfig::new().init();
+
+  for batch in dataset {
+      let output = model.forward_classification(batch);
+      let grads = GradientsParams::from_grads(output.loss.backward(), &model);
+      model = optimizer.step(lr, model, grads);
+
+      // DeltaFabric sync - single call, returns updated model
+      model = fabric.step(model).await?;
+  }
+  ```
+
+### New Files
+
+- `src/burn/traits.rs`: Contains `extract_params()` and `apply_params()` helper functions
+
+---
+
+## v0.4 (continued)
+
+### New Examples
+
+Added partitioned distributed training examples with dataset sharding:
+
+- `examples/mnist/mnist_distributed_2/`: 2-node distributed training
+  - Node 1: samples 0-29,999
+  - Node 2: samples 30,000-59,999
+
+- `examples/mnist/mnist_distributed_3/`: 3-node distributed training
+  - Node 1: samples 0-19,999
+  - Node 2: samples 20,000-39,999
+  - Node 3: samples 40,000-59,999
+
+### Test Coverage
+
+Added comprehensive tests for burn module helpers:
+
+- `test_extract_params_returns_all_params`
+- `test_apply_params_updates_weights`
+- `test_extract_params_preserves_order`
+- `test_apply_params_with_zeros`
+- `test_extract_apply_roundtrip`
+- `test_different_model_sizes`
+
+---
+
+## v0.3
+
+### New Examples
+
+Added MNIST distributed training example demonstrating DeltaFabric's weight synchronization protocol:
+
+- `examples/mnist/mnist_single/`: Single-node baseline training (no networking)
+
+### Dependencies Added
+
+- Added `burn-vision` feature support for vision datasets
+
+---
+
 ## v0.2
 
 ### Breaking Changes

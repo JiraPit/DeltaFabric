@@ -1,5 +1,4 @@
-pub mod flatten;
-pub mod unflatten;
+pub mod traits;
 
 #[cfg(test)]
 mod test;
@@ -12,25 +11,43 @@ use crate::core::{
     sync::{apply_deltas, generate_local_delta, process_deltas},
 };
 use anyhow::{Context, Result};
-use burn::module::Module;
-use burn::tensor::backend::Backend;
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use tracing::{info, warn};
 
-pub use flatten::flatten_burn_model;
-pub use unflatten::unflatten_burn_model;
+pub use traits::{apply_params, extract_params};
 
-pub struct Fabric<B: Backend> {
+/// Manages distributed model synchronization across nodes using delta compression.
+///
+/// Fabric coordinates parameter updates between multiple nodes by:
+/// - Aggregating incoming deltas from peers
+/// - Applying synced parameters to local models
+/// - Broadcasting local deltas at configurable intervals
+pub struct Fabric {
+    /// Zenoh session for network communication
     pub session: Session,
+    /// Configuration parameters for delta sync
     pub config: Config,
+    /// Reference weights for delta computation (updated on each sync)
     pub anchor_weights: Vec<f32>,
+    /// Tracks last seen sequence ID per origin node for deduplication
     pub seen_table: HashMap<u64, u64>,
+    /// Local sequence counter for delta ordering
     pub local_sequence: u64,
-    _backend: PhantomData<B>,
+    /// Total number of sync steps performed
+    pub step_count: u64,
 }
 
-impl<B: Backend> Fabric<B> {
+impl Fabric {
+    /// Creates a new Fabric instance and initializes cluster discovery.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_id` - Unique identifier for this node (1-indexed)
+    /// * `config` - Configuration containing peers and sync parameters
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Zenoh session creation or cluster initialization fails.
     pub async fn new(node_id: u64, config: Config) -> Result<Self> {
         info!(node_id = %node_id, "Initializing DeltaFabric");
 
@@ -56,12 +73,38 @@ impl<B: Backend> Fabric<B> {
             anchor_weights: Vec::new(),
             seen_table: HashMap::new(),
             local_sequence: 0,
-            _backend: PhantomData,
+            step_count: 0,
         })
     }
 
-    pub async fn step<M: Module<B>>(&mut self, model: M, step_count: u64) -> Result<M> {
-        let mut active_flat = flatten_burn_model(&model).context("Failed to flatten model")?;
+    /// Performs one synchronization step, updating model with peer deltas.
+    ///
+    /// This method:
+    /// 1. Extracts parameters from the model
+    /// 2. Pulls and processes incoming delta packets from peers
+    /// 3. Applies aggregated deltas to model weights
+    /// 4. Generates and broadcasts local delta if sync interval reached
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The model to sync (taken by value, returned updated)
+    ///
+    /// # Type Parameters
+    ///
+    /// * `B` - Burn backend (e.g., NdArray)
+    /// * `M` - Model type implementing Module
+    ///
+    /// # Returns
+    ///
+    /// Updated model with synced parameters applied.
+    pub async fn step<B: burn::tensor::backend::Backend, M: burn::module::Module<B>>(
+        &mut self,
+        model: M,
+    ) -> Result<M> {
+        self.step_count += 1;
+        let step_count = self.step_count;
+
+        let mut active_flat = extract_params(&model);
 
         if self.anchor_weights.is_empty() {
             self.anchor_weights = active_flat.clone();
@@ -81,7 +124,7 @@ impl<B: Backend> Fabric<B> {
                 Ok(incoming) => {
                     if let Some(updates) = process_deltas(
                         &mut aggregator,
-                        &incoming,
+                        incoming,
                         &mut self.seen_table,
                         self.config.alpha,
                         self.config.relay_threshold,
@@ -135,12 +178,13 @@ impl<B: Backend> Fabric<B> {
                 .context("Failed to broadcast packet")?;
         }
 
-        let model =
-            unflatten_burn_model(model, &active_flat).context("Failed to unflatten model")?;
-
+        let model = apply_params(model, &active_flat);
         Ok(model)
     }
 
+    /// Shuts down the Fabric, closing all network connections.
+    ///
+    /// Broadcasts an OFFLINE status to peers before closing.
     pub async fn shutdown(&mut self) -> Result<()> {
         info!(node_id = %self.session.node.id, "Shutting down DeltaFabric");
 

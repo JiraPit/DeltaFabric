@@ -1,5 +1,7 @@
 # Rust/Cargo
 /target/
+examples/*/target/
+examples/*/*/target/
 **/*.rs.bk
 
 # IDE
@@ -31,3 +33,6 @@ Thumbs.db
 # Debug
 debug/
 release/
+
+# Documentation
+/docs/

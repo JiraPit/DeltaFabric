@@ -1,0 +1,9 @@
+[package]
+name = "mnist_shared"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+burn = { version = "0.20", features = ["train"] }
+burn-ndarray = "0.20"

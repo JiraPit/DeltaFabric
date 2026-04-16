@@ -1,0 +1,17 @@
+[package]
+name = "mnist_single"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "mnist_single"
+path = "src/main.rs"
+
+[dependencies]
+mnist_shared = { path = "../mnist_shared" }
+burn = { version = "0.20", features = ["train", "autodiff", "dataset", "vision"] }
+burn-ndarray = "0.20"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

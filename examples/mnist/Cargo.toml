@@ -1,0 +1,3 @@
+[workspace]
+members = ["mnist_shared", "mnist_single", "mnist_distributed_2", "mnist_distributed_3"]
+resolver = "2"

@@ -7,26 +7,49 @@ use std::vec::Vec;
 use tracing::{error, info, warn};
 use zenoh::Session as ZenohSession;
 
+/// Represents the state of a node in the cluster.
+///
+/// Published to peers for cluster discovery and health monitoring.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NodeState {
+    /// IDs of peers this node is connected to
     pub peers: Vec<u64>,
+    /// Current status: "DISCOVERING", "READY", or "OFFLINE"
     pub status: String,
 }
 
+/// Represents a node in the distributed cluster.
 #[derive(Clone, Debug)]
 pub struct Node {
+    /// Unique identifier for this node
     pub id: u64,
+    /// List of peer node IDs
     pub peers: Vec<u64>,
 }
 
+/// Manages Zenoh network communication for delta synchronization.
+///
+/// Handles cluster discovery, peer communication, and delta broadcasting.
 pub struct Session {
     zenoh: ZenohSession,
+    /// Local node information
     pub node: Node,
+    /// Buffer for received delta samples
     delta_samples: Arc<Mutex<Vec<zenoh::sample::Sample>>>,
+    /// Publisher for broadcasting local deltas
     delta_publisher: Option<zenoh::pubsub::Publisher<'static>>,
 }
 
 impl Session {
+    /// Creates a new Session with the given node configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `node` - Node struct with id and peer list
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Zenoh session creation fails.
     pub async fn new(node: Node) -> Result<Self> {
         let zenoh = zenoh::open(zenoh::Config::default())
             .await
@@ -42,6 +65,10 @@ impl Session {
         })
     }
 
+    /// Initializes the fabric by performing cluster discovery.
+    ///
+    /// Waits for all peers to become READY before completing.
+    /// Sets up delta publishers and subscribers after discovery.
     pub async fn init_fabric(&mut self) -> Result<()> {
         let my_topic = format!("node/{}/state", self.node.id);
         let publisher = self
@@ -85,15 +112,15 @@ impl Session {
             }
 
             for sample in samples_to_process {
-                if let Some(id_str) = sample.key_expr().as_str().split('/').nth(1) {
-                    if let Ok(incoming_id) = id_str.parse::<u64>() {
-                        match serde_json::from_slice::<NodeState>(&sample.payload().to_bytes()) {
-                            Ok(state) => {
-                                known_states.insert(incoming_id, state);
-                            }
-                            Err(e) => {
-                                warn!(node_id = %incoming_id, error = %e, "Failed to parse NodeState from peer");
-                            }
+                if let Some(id_str) = sample.key_expr().as_str().split('/').nth(1)
+                    && let Ok(incoming_id) = id_str.parse::<u64>()
+                {
+                    match serde_json::from_slice::<NodeState>(&sample.payload().to_bytes()) {
+                        Ok(state) => {
+                            known_states.insert(incoming_id, state);
+                        }
+                        Err(e) => {
+                            warn!(node_id = %incoming_id, error = %e, "Failed to parse NodeState from peer");
                         }
                     }
                 }
@@ -142,7 +169,7 @@ impl Session {
             if is_ready
                 && global_nodes
                     .iter()
-                    .all(|id| known_states.get(id).map_or(false, |s| s.status == "READY"))
+                    .all(|id| known_states.get(id).is_some_and(|s| s.status == "READY"))
             {
                 break;
             }
@@ -182,6 +209,11 @@ impl Session {
         Ok(())
     }
 
+    /// Retrieves and clears all received delta packets.
+    ///
+    /// # Returns
+    ///
+    /// Vector of Zenoh samples containing delta packets from peers.
     pub fn pull_packets(&self) -> Vec<zenoh::sample::Sample> {
         let mut samples = Vec::new();
         if let Ok(mut guard) = self.delta_samples.lock() {
@@ -190,6 +222,11 @@ impl Session {
         samples
     }
 
+    /// Broadcasts a delta packet to all peers.
+    ///
+    /// # Arguments
+    ///
+    /// * `packet` - The DeltaPacket to broadcast
     pub async fn broadcast(&self, packet: crate::core::packet::DeltaPacket) -> Result<()> {
         use rkyv::{api::high::to_bytes_with_alloc, ser::allocator::Arena};
 
@@ -206,6 +243,7 @@ impl Session {
         Ok(())
     }
 
+    /// Shuts down the session, broadcasting OFFLINE status to peers.
     pub async fn shutdown(&mut self) -> Result<()> {
         let state = NodeState {
             peers: self.node.peers.clone(),
