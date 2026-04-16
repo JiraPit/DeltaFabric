@@ -75,13 +75,6 @@ for batch in dataset {
 fabric.shutdown().await?;
 ```
 
-## Key Points
-
-- **Single model**: Works with `Model<Autodiff<Backend>>` directly
-- **No step count**: Fabric tracks it internally
-- **No extract/apply**: `fabric.step()` handles parameter extraction and application
-- **Ring topology**: 1 → 2 → ... → N → 1
-
 ## Configuration Defaults
 
 | Parameter               | Default | Description                     |
