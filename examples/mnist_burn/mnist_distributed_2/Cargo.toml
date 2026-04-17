@@ -9,10 +9,11 @@ name = "mnist_distributed_2"
 path = "src/main.rs"
 
 [dependencies]
-delta_fabric = { path = "../../../" }
+delta_fabric = { path = "../../../", features = ["burn"] }
 mnist_shared = { path = "../mnist_shared" }
 burn = { version = "0.20", features = ["train", "autodiff", "dataset", "vision"] }
-burn-ndarray = "0.20"
+burn-tch = "0.20"
+tch = "0.22"
 tokio = { version = "1.52", features = ["full"] }
 anyhow = "1.0"
 tracing = "0.1"

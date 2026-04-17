@@ -1,12 +1,18 @@
 [package]
 name = "delta_fabric"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
+
+[features]
+default = []
+burn = ["dep:burn"]
+pytorch = ["pyo3"]
 
 [dependencies]
 anyhow = "1.0.102"
-burn = "0.20.1"
-rkyv = "0.8.15"
+burn = { version = "0.20.1", optional = true, default-features = false }
+pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
+rkyv = { version = "0.8.15", features = ["unaligned"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { version = "1.52.0", features = ["full"] }
@@ -14,5 +20,9 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 zenoh = "1.9.0"
 
+[lib]
+name = "delta_fabric"
+crate-type = ["cdylib", "rlib"]
+
 [dev-dependencies]
-burn-ndarray = "0.20.1"
+burn-tch = { version = "0.20.1", default-features = false }

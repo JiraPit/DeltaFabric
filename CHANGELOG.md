@@ -4,6 +4,37 @@ This document tracks changes, deviations, and improvements across versions.
 
 ---
 
+## v0.5
+
+### Multi-Backend Support
+
+Added PyTorch compatibility layer alongside Burn:
+
+- **New `pytorch` feature flag**: `cargo build --features pytorch`
+- **New `src/pytorch/mod.rs`**: Pure PyO3 implementation (no tch/libtorch dependency)
+- **Consistent API**: `fabric.step(model)` works identically for both backends
+- **Python extension**: Builds as `libdelta_fabric.so` for direct Python import
+
+### New Examples
+
+- **Renamed**: `examples/mnist/` → `examples/mnist_burn/` (Burn ML framework)
+- **New**: `examples/mnist_pytorch/` - PyTorch equivalents of all examples
+
+  Both use 10% of MNIST (6,000 samples) for faster training:
+  - `mnist_single/`: Single-node baseline
+  - `mnist_distributed_2/`: 2-node (3,000 samples each)
+  - `mnist_distributed_3/`: 3-node (2,000 samples each)
+
+### Model Architecture
+
+Reduced model size for faster training (~75% reduction):
+
+- Conv channels: 32 → 16
+- FC hidden: 64 → 32
+- Total params: ~61,738 → ~15,642
+
+---
+
 ## v0.4
 
 ### API Simplification
@@ -207,4 +238,3 @@ All tests use imported functions with dummy data, no logic reimplementation.
 | tokio | 1.52.0 |
 | anyhow | 1.0.102 |
 | tracing | 0.1.44 |
-

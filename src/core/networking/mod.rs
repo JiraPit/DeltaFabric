@@ -38,6 +38,8 @@ pub struct Session {
     delta_samples: Arc<Mutex<Vec<zenoh::sample::Sample>>>,
     /// Publisher for broadcasting local deltas
     delta_publisher: Option<zenoh::pubsub::Publisher<'static>>,
+    /// Subscribers for receiving deltas from peers (must be kept alive)
+    delta_subscribers: Vec<zenoh::pubsub::Subscriber<()>>,
 }
 
 impl Session {
@@ -62,6 +64,7 @@ impl Session {
             node,
             delta_samples: Arc::new(Mutex::new(Vec::new())),
             delta_publisher: None,
+            delta_subscribers: Vec::new(),
         })
     }
 
@@ -104,10 +107,17 @@ impl Session {
                 .map_err(|e| anyhow::anyhow!("Failed to publish state: {}", e))?;
 
             let mut samples_to_process = Vec::new();
-            while let Ok(sample) = state_sub.recv_async().await {
-                samples_to_process.push(sample);
-                if samples_to_process.len() > 100 {
-                    break;
+            loop {
+                let read_timeout =
+                    tokio::time::timeout(Duration::from_millis(50), state_sub.recv_async());
+                match read_timeout.await {
+                    Ok(Ok(sample)) => {
+                        samples_to_process.push(sample);
+                        if samples_to_process.len() >= 100 {
+                            break;
+                        }
+                    }
+                    _ => break,
                 }
             }
 
@@ -187,7 +197,7 @@ impl Session {
         let samples_ref = self.delta_samples.clone();
         for peer_id in &self.node.peers {
             let samples = samples_ref.clone();
-            self.zenoh
+            let sub = self.zenoh
                 .declare_subscriber(format!("node/{}/delta", peer_id))
                 .callback(move |sample| {
                     if let Ok(mut guard) = samples.lock() {
@@ -202,6 +212,7 @@ impl Session {
                         e
                     )
                 })?;
+            self.delta_subscribers.push(sub);
         }
 
         info!(node_id = %self.node.id, "Cluster initialization complete");

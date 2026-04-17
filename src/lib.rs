@@ -1,17 +1,32 @@
-pub mod burn;
 pub mod core;
 
+#[cfg(feature = "burn")]
+pub mod burn;
+
+#[cfg(feature = "pytorch")]
+pub mod pytorch;
+
 use anyhow::Result;
-pub use burn::{Fabric, apply_params, extract_params};
 pub use core::{
     ArchivedDeltaPacket, Config, DeltaPacket, Node, NodeState, Session, SparseDelta,
     access_archived_packet, process_deltas,
 };
-pub mod prelude {
-    pub use crate::Config;
-    pub use crate::apply_params;
-    pub use crate::extract_params;
-    pub use anyhow::{Context, Result};
+
+#[cfg(feature = "burn")]
+pub use burn::Fabric;
+
+#[cfg(feature = "pytorch")]
+pub use pytorch::Fabric;
+
+#[cfg(feature = "pytorch")]
+use pyo3::prelude::*;
+
+#[cfg(feature = "pytorch")]
+#[pymodule]
+fn delta_fabric(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<pytorch::Fabric>()?;
+    m.add_class::<pytorch::Config>()?;
+    Ok(())
 }
 
 /// Initializes tracing with default filter "info,delta_fabric=debug".

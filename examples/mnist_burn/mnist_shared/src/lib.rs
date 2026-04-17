@@ -82,11 +82,11 @@ const NUM_CLASSES: usize = 10;
 
 impl<B: Backend> Model<B> {
     pub fn new(device: &B::Device) -> Self {
-        let conv1 = ConvBlock::new([1, 32], [3, 3], device, true);
-        let conv2 = ConvBlock::new([32, 32], [3, 3], device, true);
-        let hidden_size = 32 * 5 * 5;
-        let fc1 = nn::LinearConfig::new(hidden_size, 64).init(device);
-        let fc2 = nn::LinearConfig::new(64, NUM_CLASSES).init(device);
+        let conv1 = ConvBlock::new([1, 16], [3, 3], device, true);
+        let conv2 = ConvBlock::new([16, 16], [3, 3], device, true);
+        let hidden_size = 16 * 5 * 5;
+        let fc1 = nn::LinearConfig::new(hidden_size, 32).init(device);
+        let fc2 = nn::LinearConfig::new(32, NUM_CLASSES).init(device);
 
         Self {
             conv1,

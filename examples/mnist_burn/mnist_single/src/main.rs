@@ -6,13 +6,13 @@ use burn::{
     prelude::*,
     tensor::backend::AutodiffBackend,
 };
-use burn_ndarray::{NdArray, NdArrayDevice};
+use burn_tch::{LibTorch, LibTorchDevice};
 use mnist_shared::{MnistBatch, Model};
 
 const BATCH_SIZE: usize = 32;
 const EPOCHS: usize = 5;
 const LEARNING_RATE: f64 = 0.01;
-const TRAIN_SAMPLES: usize = 6000;
+const TRAIN_SAMPLES: usize = 60000;
 
 pub fn init_tracing() {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -96,7 +96,7 @@ pub fn train<B: AutodiffBackend>(
 }
 
 pub fn accuracy<B: Backend>(model: &Model<B>, dataset: &MnistDataset, device: &B::Device) -> f64 {
-    let num_batches = TRAIN_SAMPLES / BATCH_SIZE;
+    let num_batches = dataset.len() / BATCH_SIZE;
     let mut correct = 0usize;
 
     for batch_idx in 0..num_batches {
@@ -123,10 +123,10 @@ pub fn accuracy<B: Backend>(model: &Model<B>, dataset: &MnistDataset, device: &B
 fn main() -> Result<()> {
     init_tracing();
 
-    let device = NdArrayDevice::default();
+    let device = LibTorchDevice::default();
 
     tracing::info!("Initializing single-node MNIST training");
-    tracing::info!("Backend: ndarray CPU");
+
     tracing::info!(
         "Epochs: {}, Batch size: {}, LR: {}",
         EPOCHS,
@@ -134,7 +134,7 @@ fn main() -> Result<()> {
         LEARNING_RATE
     );
 
-    let mut model: Model<Autodiff<NdArray<f32>>> = Model::new(&device);
+    let mut model: Model<Autodiff<LibTorch<f32>>> = Model::new(&device);
     tracing::info!(num_params = %model.num_params(), "Model initialized");
 
     tracing::info!("Loading MNIST data...");
@@ -142,7 +142,8 @@ fn main() -> Result<()> {
     let test_dataset = MnistDataset::test();
 
     tracing::info!(
-        train_samples = %train_dataset.len(),
+        train_samples = %TRAIN_SAMPLES,
+        train_available = %train_dataset.len(),
         test_samples = %test_dataset.len(),
         "Datasets loaded"
     );

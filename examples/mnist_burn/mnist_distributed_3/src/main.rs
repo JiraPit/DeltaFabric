@@ -8,7 +8,7 @@ use burn::{
     prelude::*,
     tensor::backend::AutodiffBackend,
 };
-use burn_ndarray::{NdArray, NdArrayDevice};
+use burn_tch::{LibTorch, LibTorchDevice};
 use delta_fabric::{Config, Fabric};
 use mnist_shared::{MnistBatch, Model};
 
@@ -16,9 +16,27 @@ const BATCH_SIZE: usize = 32;
 const EPOCHS: usize = 5;
 const LEARNING_RATE: f64 = 0.01;
 
-const NUM_NODES: usize = 2;
+const NUM_NODES: usize = 3;
 const TRAIN_SAMPLES: usize = 60000;
-const TRAIN_SAMPLES_PER_NODE: usize = 3000;
+const TRAIN_SAMPLES_PER_NODE: usize = TRAIN_SAMPLES / NUM_NODES;
+const SYNC_INTERVAL: usize = (TRAIN_SAMPLES_PER_NODE / BATCH_SIZE) / 2;
+const SEED: u64 = 42;
+
+fn shuffle_indices(seed: u64, count: usize) -> Vec<usize> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    
+    let mut indices: Vec<usize> = (0..count).collect();
+    let mut hasher = DefaultHasher::new();
+    seed.hash(&mut hasher);
+    let hash = hasher.finish();
+    
+    for i in (1..count).rev() {
+        let j = ((hash.wrapping_mul((i + 1) as u64)) % (i + 1) as u64) as usize;
+        indices.swap(i, j);
+    }
+    indices
+}
 
 pub fn init_tracing() {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -45,22 +63,22 @@ fn get_partition_range(node_id: u64) -> (usize, usize) {
     (start, end)
 }
 
-pub fn load_batch<B: Backend>(
+pub fn load_batch_by_indices<B: Backend>(
     dataset: &MnistDataset,
-    partition_start: usize,
+    indices: &[usize],
     batch_idx: usize,
     device: &B::Device,
 ) -> Option<MnistBatch<B>> {
-    let start = partition_start + batch_idx * BATCH_SIZE;
-    if start >= partition_start + TRAIN_SAMPLES_PER_NODE {
+    let start = batch_idx * BATCH_SIZE;
+    if start >= indices.len() {
         return None;
     }
 
-    let end = (start + BATCH_SIZE).min(partition_start + TRAIN_SAMPLES_PER_NODE);
+    let end = (start + BATCH_SIZE).min(indices.len());
     let mut images = Vec::new();
     let mut targets = Vec::new();
 
-    for i in start..end {
+    for &i in &indices[start..end] {
         if let Some(item) = dataset.get(i) {
             let flat_image: Vec<f32> = item.image.iter().flatten().copied().collect();
             let img: Tensor<B, 3> = Tensor::from_data(
@@ -90,16 +108,16 @@ pub fn load_batch<B: Backend>(
 pub async fn train<B: AutodiffBackend>(
     mut model: Model<B>,
     dataset: &MnistDataset,
-    partition_start: usize,
+    indices: &[usize],
     device: &B::Device,
     fabric: &mut Fabric,
 ) -> Result<(Model<B>, f64)> {
-    let num_batches = TRAIN_SAMPLES_PER_NODE / BATCH_SIZE;
+    let num_batches = indices.len() / BATCH_SIZE;
     let mut total_loss: f64 = 0.0;
     let mut optimizer = SgdConfig::new().init();
 
     for batch_idx in 0..num_batches {
-        let batch = load_batch::<B>(dataset, partition_start, batch_idx, device).unwrap();
+        let batch = load_batch_by_indices::<B>(dataset, indices, batch_idx, device).unwrap();
 
         let output = model.forward_classification(batch.clone());
         let loss = output.loss;
@@ -121,14 +139,13 @@ pub async fn train<B: AutodiffBackend>(
 pub fn accuracy<B: Backend>(
     model: &Model<B>,
     dataset: &MnistDataset,
-    partition_start: usize,
     device: &B::Device,
 ) -> f64 {
-    let num_batches = TRAIN_SAMPLES_PER_NODE / BATCH_SIZE;
+    let num_batches = dataset.len() / BATCH_SIZE;
     let mut correct = 0usize;
 
     for batch_idx in 0..num_batches {
-        let batch = load_batch::<B>(dataset, partition_start, batch_idx, device).unwrap();
+        let batch = load_batch_by_indices::<B>(dataset, &(0..dataset.len()).collect::<Vec<_>>(), batch_idx, device).unwrap();
         let output = model.forward_classification(batch.clone());
 
         let predictions = output.output.argmax(1);
@@ -174,29 +191,33 @@ async fn main() -> Result<()> {
         node_id = %node_id,
         peers = ?peers,
         partition = ?(partition_start, partition_end),
-        "Starting distributed MNIST training (2 nodes)"
+        "Starting distributed MNIST training (3 nodes)"
     );
 
     tracing::info!("Initializing DeltaFabric...");
 
-    let config = Config::new(peers);
+    let config = Config::new(peers)
+        .alpha(0.1)
+        .delta_selection_ratio(0.01)
+        .sync_interval(SYNC_INTERVAL as u64);
     let mut fabric = Fabric::new(node_id, config)
         .await
         .expect("Failed to initialize DeltaFabric");
 
     tracing::info!(node_id = %node_id, "DeltaFabric initialized");
 
-    let device = NdArrayDevice::default();
+    let device = LibTorchDevice::default();
+    tch::manual_seed(SEED as i64);
 
-    let mut model: Model<Autodiff<NdArray<f32>>> = Model::new(&device);
+    let mut model: Model<Autodiff<LibTorch<f32>>> = Model::new(&device);
     tracing::info!(num_params = %model.num_params(), "Model initialized");
 
     tracing::info!("Loading MNIST data...");
     let test_dataset = MnistDataset::test();
 
     tracing::info!(
+        train_samples = %TRAIN_SAMPLES,
         test_samples = %test_dataset.len(),
-        partition_samples = %TRAIN_SAMPLES_PER_NODE,
         "Datasets loaded"
     );
 
@@ -204,13 +225,28 @@ async fn main() -> Result<()> {
 
     for epoch in 0..EPOCHS {
         let dataset = MnistDataset::train();
+        let shuffled_indices = shuffle_indices(SEED, TRAIN_SAMPLES);
+        let my_indices: Vec<usize> = shuffled_indices
+            .into_iter()
+            .skip(partition_start)
+            .take(TRAIN_SAMPLES_PER_NODE)
+            .collect();
 
-        let (new_model, _) =
-            train::<Autodiff<NdArray<f32>>>(model, &dataset, partition_start, &device, &mut fabric)
-                .await?;
+        let (new_model, _) = train::<Autodiff<LibTorch<f32>>>(
+            model,
+            &dataset,
+            &my_indices,
+            &device,
+            &mut fabric,
+        )
+        .await?;
         model = new_model;
 
-        let acc = accuracy(&model, &test_dataset, partition_start, &device);
+        let acc = accuracy(
+            &model,
+            &test_dataset,
+            &device,
+        );
 
         tracing::info!(
             epoch = %epoch,

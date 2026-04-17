@@ -1,11 +1,11 @@
-# DeltaFabric MNIST Example
+# DeltaFabric MNIST Example (Burn ML Framework)
 
-Distributed MNIST training demonstrating DeltaFabric's weight synchronization protocol.
+Distributed MNIST training demonstrating DeltaFabric's weight synchronization protocol using the Burn ML framework.
 
 ## Structure
 
 ```
-examples/mnist/
+examples/mnist_burn/
 ├── Cargo.toml              # Workspace manifest
 ├── mnist_shared/           # Shared CNN model
 │   └── src/lib.rs
@@ -22,7 +22,7 @@ examples/mnist/
 ### Single Node (baseline)
 
 ```bash
-cd examples/mnist
+cd examples/mnist_burn
 cargo run -p mnist_single
 ```
 
@@ -54,24 +54,20 @@ DF_NODE_ID=3 DF_PEERS=1,2 cargo run -p mnist_distributed_3
 ```rust
 use delta_fabric::{Config, Fabric};
 
-// 1. Create config with sensible defaults
 let config = Config::new(peers);
 let mut fabric = Fabric::new(node_id, config).await?;
 
-// 2. Create model (Autodiff<NdArray> for training)
 let mut model: Model<Autodiff<NdArray<f32>>> = Model::new(&device);
 
-// 3. Training loop
 for batch in dataset {
     let output = model.forward_classification(batch);
     let grads = GradientsParams::from_grads(output.loss.backward(), &model);
     model = optimizer.step(lr, model, grads);
 
-    // DeltaFabric sync - single call, returns updated model
+    // DeltaFabric sync
     model = fabric.step(model).await?;
 }
 
-// 4. Shutdown
 fabric.shutdown().await?;
 ```
 
