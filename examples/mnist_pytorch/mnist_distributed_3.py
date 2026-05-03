@@ -53,7 +53,9 @@ def main():
     )
 
     global fabric
-    config = Config(peers=peers, alpha=0.25, sync_interval=100, delta_selection_ratio=0.01)
+    config = Config(
+        peers=peers, alpha=0.25, sync_interval=100, delta_selection_ratio=0.01
+    )
 
     fabric = Fabric(node_id=node_id, config=config)
 
@@ -123,7 +125,9 @@ def main():
         acc = correct / total
         elapsed = time.time() - start_time
         total_elapsed += elapsed
-        print(f"Node {node_id}, Epoch {epoch + 1}: Accuracy = {acc:.4f}, Time = {elapsed:.2f}s")
+        print(
+            f"Node {node_id}, Epoch {epoch + 1}: Accuracy = {acc:.4f}, Time = {elapsed:.2f}s"
+        )
 
     print(f"Node {node_id}: Training complete")
     print(f"Node {node_id}: Average time per epoch: {total_elapsed / EPOCHS:.2f}s")

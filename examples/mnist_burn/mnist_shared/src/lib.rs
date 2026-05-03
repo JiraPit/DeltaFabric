@@ -68,6 +68,7 @@ pub struct Model<B: Backend> {
     conv2: ConvBlock<B>,
     fc1: nn::Linear<B>,
     fc2: nn::Linear<B>,
+    fc3: nn::Linear<B>,
     activation: nn::Relu,
 }
 
@@ -82,17 +83,19 @@ const NUM_CLASSES: usize = 10;
 
 impl<B: Backend> Model<B> {
     pub fn new(device: &B::Device) -> Self {
-        let conv1 = ConvBlock::new([1, 16], [3, 3], device, true);
-        let conv2 = ConvBlock::new([16, 16], [3, 3], device, true);
-        let hidden_size = 16 * 5 * 5;
+        let conv1 = ConvBlock::new([1, 32], [3, 3], device, true);
+        let conv2 = ConvBlock::new([32, 32], [3, 3], device, true);
+        let hidden_size = 32 * 5 * 5;
         let fc1 = nn::LinearConfig::new(hidden_size, 32).init(device);
-        let fc2 = nn::LinearConfig::new(32, NUM_CLASSES).init(device);
+        let fc2 = nn::LinearConfig::new(32, 16).init(device);
+        let fc3 = nn::LinearConfig::new(16, NUM_CLASSES).init(device);
 
         Self {
             conv1,
             conv2,
             fc1,
             fc2,
+            fc3,
             activation: nn::Relu::new(),
         }
     }
@@ -110,7 +113,10 @@ impl<B: Backend> Model<B> {
         let x = self.fc1.forward(x);
         let x = self.activation.forward(x);
 
-        self.fc2.forward(x)
+        let x = self.fc2.forward(x);
+        let x = self.activation.forward(x);
+
+        self.fc3.forward(x)
     }
 
     pub fn forward_classification(&self, item: MnistBatch<B>) -> ClassificationOutput<B> {

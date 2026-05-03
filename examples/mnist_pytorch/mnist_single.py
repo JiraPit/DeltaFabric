@@ -31,7 +31,7 @@ def main():
     test_dataset = datasets.MNIST(
         "./data", train=False, download=False, transform=transform
     )
-    
+
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
@@ -63,7 +63,7 @@ def main():
                 predictions = output.argmax(dim=1)
                 correct += (predictions == targets).sum().item()
                 total += targets.size(0)
-        
+
         acc = correct / total
         elapsed = time.time() - start_time
         total_elapsed += elapsed
