@@ -1,6 +1,6 @@
 [package]
 name = "delta_fabric"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 
 [features]
@@ -26,3 +26,4 @@ crate-type = ["cdylib", "rlib"]
 
 [dev-dependencies]
 burn-tch = { version = "0.20.1", default-features = false }
+burn-ndarray = { version = "0.20.1", default-features = false }

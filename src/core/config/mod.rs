@@ -21,7 +21,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            alpha: 0.5,
+            alpha: 0.1,
             delta_selection_ratio: 0.01,
             sync_interval: 100,
             relay_threshold: 1e-6,

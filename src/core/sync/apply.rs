@@ -1,6 +1,6 @@
 use crate::core::packet::{ArchivedDeltaPacket, SparseDelta};
 use std::collections::HashMap;
-use tracing::{debug, trace};
+use tracing::debug;
 
 /// Processes incoming deltas, aggregates them, and prepares relay updates.
 ///
@@ -23,6 +23,7 @@ pub fn process_deltas(
     seen_table: &mut HashMap<u64, u64>,
     alpha: f32,
     relay_threshold: f32,
+    my_id: u64,
 ) -> Option<HashMap<u64, SparseDelta>> {
     let mut relay_updates = HashMap::new();
     let mut fresh_count = 0;
@@ -30,13 +31,18 @@ pub fn process_deltas(
 
     for (origin_id, delta) in incoming.updates.iter() {
         let origin_id: u64 = (*origin_id).into();
+
+        // Skip our own updates that were relayed back to us
+        if origin_id == my_id {
+            continue;
+        }
+
         let last_seq = seen_table.get(&origin_id).copied().unwrap_or(0);
         let seq_id: u64 = delta.sequence_id.into();
 
         if seq_id > last_seq {
             fresh_count += 1;
             seen_table.insert(origin_id, seq_id);
-            trace!(origin_id = %origin_id, seq = %seq_id, "Processing fresh delta");
 
             let mut relay_indices = Vec::new();
             let mut relay_values = Vec::new();
@@ -66,7 +72,6 @@ pub fn process_deltas(
             }
         } else {
             stale_count += 1;
-            trace!(origin_id = %origin_id, seq = %seq_id, last_seq = %last_seq, "Skipping stale delta");
         }
     }
 
@@ -97,6 +102,5 @@ pub fn apply_deltas(active: &mut [f32], anchor: &mut [f32], aggregator: &HashMap
     for (&idx, &delta) in aggregator.iter() {
         active[idx as usize] += delta;
         anchor[idx as usize] += delta;
-        trace!(idx = %idx, delta = %delta, "Applied delta to weights");
     }
 }

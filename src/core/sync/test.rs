@@ -75,7 +75,7 @@ mod sync_tests {
         let mut aggregator: HashMap<u32, f32> = HashMap::new();
         let mut seen_table: HashMap<u64, u64> = HashMap::new();
 
-        let relay = process_deltas(&mut aggregator, archived, &mut seen_table, 1.0, 0.0);
+        let relay = process_deltas(&mut aggregator, archived, &mut seen_table, 1.0, 0.0, 99);
 
         assert!(relay.is_some());
         assert_eq!(seen_table.get(&1), Some(&10));
@@ -102,7 +102,7 @@ mod sync_tests {
         let mut aggregator: HashMap<u32, f32> = HashMap::new();
         let mut seen_table: HashMap<u64, u64> = HashMap::from([(1, 10)]);
 
-        let relay = process_deltas(&mut aggregator, archived, &mut seen_table, 1.0, 0.0);
+        let relay = process_deltas(&mut aggregator, archived, &mut seen_table, 1.0, 0.0, 99);
 
         assert!(relay.is_none());
         assert!(aggregator.is_empty());
@@ -128,7 +128,7 @@ mod sync_tests {
         let mut aggregator: HashMap<u32, f32> = HashMap::new();
         let mut seen_table: HashMap<u64, u64> = HashMap::new();
 
-        let relay = process_deltas(&mut aggregator, archived, &mut seen_table, 1.0, 0.5);
+        let relay = process_deltas(&mut aggregator, archived, &mut seen_table, 1.0, 0.5, 99);
 
         assert!(relay.is_some());
         let relay_updates = relay.unwrap();

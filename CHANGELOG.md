@@ -4,6 +4,19 @@ This document tracks changes, deviations, and improvements across versions.
 
 ---
 
+## v0.6
+
+### Optimization
+
+Both Burn and PyTorch backends now skip unnecessary parameter extraction. Parameters are only extracted when needed: first step (anchor initialization), peer updates received, or sync step (local delta generation). Mathematical behavior is unchanged.
+
+### Bug Fixes
+
+- **Burn**: Fixed bug where `anchor_weights` was not initialized on first step when no peer updates and not sync step
+- **PyTorch**: Fixed missing `my_id` argument in `process_deltas` call
+
+---
+
 ## v0.5
 
 ### Multi-Backend Support

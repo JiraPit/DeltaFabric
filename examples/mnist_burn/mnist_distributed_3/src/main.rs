@@ -4,6 +4,7 @@ use anyhow::Result;
 use burn::backend::Autodiff;
 use burn::{
     data::dataset::{vision::MnistDataset, Dataset},
+    module::AutodiffModule,
     optim::{GradientsParams, Optimizer, SgdConfig},
     prelude::*,
     tensor::backend::AutodiffBackend,
@@ -19,18 +20,17 @@ const LEARNING_RATE: f64 = 0.01;
 const NUM_NODES: usize = 3;
 const TRAIN_SAMPLES: usize = 60000;
 const TRAIN_SAMPLES_PER_NODE: usize = TRAIN_SAMPLES / NUM_NODES;
-const SYNC_INTERVAL: usize = (TRAIN_SAMPLES_PER_NODE / BATCH_SIZE) / 2;
 const SEED: u64 = 42;
 
 fn shuffle_indices(seed: u64, count: usize) -> Vec<usize> {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    
+
     let mut indices: Vec<usize> = (0..count).collect();
     let mut hasher = DefaultHasher::new();
     seed.hash(&mut hasher);
     let hash = hasher.finish();
-    
+
     for i in (1..count).rev() {
         let j = ((hash.wrapping_mul((i + 1) as u64)) % (i + 1) as u64) as usize;
         indices.swap(i, j);
@@ -128,7 +128,17 @@ pub async fn train<B: AutodiffBackend>(
 
         model = optimizer.step(LEARNING_RATE, model, grads);
 
+        // Sync with peers
         model = fabric.step(model).await.unwrap();
+
+        if batch_idx % 100 == 0 {
+            tracing::info!(
+                "Batch {}/{}: loss = {:.4}",
+                batch_idx,
+                num_batches,
+                total_loss / (batch_idx + 1) as f64
+            );
+        }
     }
 
     let avg_loss = total_loss / num_batches as f64;
@@ -136,16 +146,18 @@ pub async fn train<B: AutodiffBackend>(
     Ok((model, avg_loss))
 }
 
-pub fn accuracy<B: Backend>(
-    model: &Model<B>,
-    dataset: &MnistDataset,
-    device: &B::Device,
-) -> f64 {
+pub fn accuracy<B: Backend>(model: &Model<B>, dataset: &MnistDataset, device: &B::Device) -> f64 {
     let num_batches = dataset.len() / BATCH_SIZE;
     let mut correct = 0usize;
 
     for batch_idx in 0..num_batches {
-        let batch = load_batch_by_indices::<B>(dataset, &(0..dataset.len()).collect::<Vec<_>>(), batch_idx, device).unwrap();
+        let batch = load_batch_by_indices::<B>(
+            dataset,
+            &(0..dataset.len()).collect::<Vec<_>>(),
+            batch_idx,
+            device,
+        )
+        .unwrap();
         let output = model.forward_classification(batch.clone());
 
         let predictions = output.output.argmax(1);
@@ -197,9 +209,9 @@ async fn main() -> Result<()> {
     tracing::info!("Initializing DeltaFabric...");
 
     let config = Config::new(peers)
-        .alpha(0.1)
+        .alpha(0.25)
         .delta_selection_ratio(0.01)
-        .sync_interval(SYNC_INTERVAL as u64);
+        .sync_interval(100);
     let mut fabric = Fabric::new(node_id, config)
         .await
         .expect("Failed to initialize DeltaFabric");
@@ -232,21 +244,12 @@ async fn main() -> Result<()> {
             .take(TRAIN_SAMPLES_PER_NODE)
             .collect();
 
-        let (new_model, _) = train::<Autodiff<LibTorch<f32>>>(
-            model,
-            &dataset,
-            &my_indices,
-            &device,
-            &mut fabric,
-        )
-        .await?;
+        let (new_model, _) =
+            train::<Autodiff<LibTorch<f32>>>(model, &dataset, &my_indices, &device, &mut fabric)
+                .await?;
         model = new_model;
 
-        let acc = accuracy(
-            &model,
-            &test_dataset,
-            &device,
-        );
+        let acc = accuracy(&model.clone().valid(), &test_dataset, &device);
 
         tracing::info!(
             epoch = %epoch,

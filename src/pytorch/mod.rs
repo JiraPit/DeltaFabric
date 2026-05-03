@@ -162,12 +162,7 @@ impl Fabric {
         })
     }
 
-    fn step_sync(
-        &self,
-        params: Vec<f32>,
-        keys: Vec<String>,
-        shapes: Vec<Vec<i64>>,
-    ) -> PyResult<Py<PyDict>> {
+    fn step_sync(&self, model_handle: Py<PyAny>) -> PyResult<StepSyncResult> {
         #[allow(clippy::await_holding_lock)]
         let result = self.runtime.block_on(async {
             let mut inner = self.inner.lock().map_err(|e| {
@@ -185,17 +180,8 @@ impl Fabric {
 
             *step_count += 1;
             let step_count_val = *step_count;
-
-            let mut active_flat = params;
-
-            if anchor_weights.is_empty() {
-                *anchor_weights = active_flat.clone();
-                info!(
-                    step = %step_count_val,
-                    num_weights = %active_flat.len(),
-                    "Initialized anchor weights"
-                );
-            }
+            let is_sync_step = step_count_val.is_multiple_of(config.sync_interval);
+            let anchor_weights_is_empty = anchor_weights.is_empty();
 
             let mut aggregator: HashMap<u32, f32> = HashMap::new();
             let mut relay_updates: HashMap<u64, SparseDelta> = HashMap::new();
@@ -211,6 +197,7 @@ impl Fabric {
                             seen_table,
                             config.alpha,
                             config.relay_threshold,
+                            session.node.id,
                         ) {
                             relay_updates.extend(updates);
                         }
@@ -221,13 +208,33 @@ impl Fabric {
                 }
             }
 
-            if !aggregator.is_empty() {
-                info!(node_id = %session.node.id, count = %aggregator.len(), "Applying peer deltas");
+            let has_peer_updates = !aggregator.is_empty();
+            let need_active = anchor_weights_is_empty || has_peer_updates || is_sync_step;
+
+            if !need_active {
+                return Ok::<_, anyhow::Error>((false, None));
             }
 
-            apply_deltas(&mut active_flat, anchor_weights, &aggregator);
+            let (mut active_flat, shapes, keys) = Python::with_gil(|py| {
+                let model = model_handle.bind(py);
+                extract_params(model)
+            }).map_err(anyhow::Error::new)?;
 
-            if step_count_val.is_multiple_of(config.sync_interval) {
+            if anchor_weights_is_empty {
+                *anchor_weights = active_flat.clone();
+                info!(
+                    step = %step_count_val,
+                    num_weights = %active_flat.len(),
+                    "Initialized anchor weights"
+                );
+            }
+
+            if has_peer_updates {
+                info!(node_id = %session.node.id, count = %aggregator.len(), "Applying peer deltas");
+                apply_deltas(&mut active_flat, anchor_weights, &aggregator);
+            }
+
+            if is_sync_step {
                 *local_sequence += 1;
                 if let Some(delta) = generate_local_delta(
                     &active_flat,
@@ -255,13 +262,17 @@ impl Fabric {
                 }
             }
 
-            Ok::<_, anyhow::Error>(active_flat)
+            let result_params = if has_peer_updates {
+                Some((active_flat, keys, shapes))
+            } else {
+                None
+            };
+
+            Ok::<_, anyhow::Error>((has_peer_updates, result_params))
         });
 
         match result {
-            Ok(active_flat) => {
-                Python::with_gil(|py| apply_params(py, &keys, &shapes, &active_flat))
-            }
+            Ok((has_peer_updates, params_opt)) => Ok((has_peer_updates, params_opt)),
             Err(e) => Err(exceptions::PyRuntimeError::new_err(format!(
                 "Step failed: {}",
                 e
@@ -305,17 +316,24 @@ impl Fabric {
     ///
     /// Updated model with synced parameters applied
     pub fn step(&self, model: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let (params, shapes, keys) = extract_params(model)?;
+        let model_handle = model.clone().unbind();
 
-        let py_dict = self.step_sync(params, keys, shapes)?;
+        let (has_peer_updates, params_opt) = self.step_sync(model_handle)?;
 
-        let load_method = model.getattr("load_state_dict").map_err(|e| {
-            exceptions::PyAttributeError::new_err(format!("Failed to get load_state_dict: {}", e))
-        })?;
+        if has_peer_updates && let Some((active_flat, keys, shapes)) = params_opt {
+            let py_dict = Python::with_gil(|py| apply_params(py, &keys, &shapes, &active_flat))?;
 
-        load_method.call1((py_dict,)).map_err(|e| {
-            exceptions::PyRuntimeError::new_err(format!("Failed to load state_dict: {}", e))
-        })?;
+            let load_method = model.getattr("load_state_dict").map_err(|e| {
+                exceptions::PyAttributeError::new_err(format!(
+                    "Failed to get load_state_dict: {}",
+                    e
+                ))
+            })?;
+
+            load_method.call1((py_dict,)).map_err(|e| {
+                exceptions::PyRuntimeError::new_err(format!("Failed to load state_dict: {}", e))
+            })?;
+        }
 
         Ok(model.clone().unbind())
     }
@@ -343,6 +361,9 @@ impl Fabric {
 /// Contains the flattened parameters, shapes, and keys from a model's state_dict.
 type ExtractResult = (Vec<f32>, Vec<Vec<i64>>, Vec<String>);
 
+/// Return type for step_sync containing update status and optional parameters.
+type StepSyncResult = (bool, Option<(Vec<f32>, Vec<String>, Vec<Vec<i64>>)>);
+
 /// Extracts parameters from a PyTorch model's state_dict.
 ///
 /// # Arguments
@@ -352,9 +373,9 @@ type ExtractResult = (Vec<f32>, Vec<Vec<i64>>, Vec<String>);
 /// # Returns
 ///
 /// Tuple of (params, shapes, keys):
-/// - params: Flattened parameter values as Vec<f32>
-/// - shapes: Original tensor shapes for reconstruction
-/// - keys: Parameter names from state_dict
+/// - `params`: Flattened parameter values as Vec<f32>
+/// - `shapes`: Original tensor shapes for reconstruction
+/// - `keys`: Parameter names from state_dict
 fn extract_params(model: &Bound<'_, PyAny>) -> PyResult<ExtractResult> {
     let state_dict = model.getattr("state_dict").map_err(|e| {
         exceptions::PyAttributeError::new_err(format!("Failed to get state_dict: {}", e))
@@ -378,11 +399,9 @@ fn extract_params(model: &Bound<'_, PyAny>) -> PyResult<ExtractResult> {
         })?;
         keys.push(key_str);
 
-        let shape_obj = value
-            .getattr("shape")
-            .map_err(|e| {
-                exceptions::PyAttributeError::new_err(format!("Failed to get shape: {}", e))
-            })?;
+        let shape_obj = value.getattr("shape").map_err(|e| {
+            exceptions::PyAttributeError::new_err(format!("Failed to get shape: {}", e))
+        })?;
         let shape: Vec<i64> = shape_obj.extract().map_err(|e| {
             exceptions::PyTypeError::new_err(format!("Failed to extract shape: {}", e))
         })?;
@@ -414,13 +433,14 @@ fn extract_params(model: &Bound<'_, PyAny>) -> PyResult<ExtractResult> {
 ///
 /// # Arguments
 ///
+/// * `py` - Python GIL token
 /// * `keys` - Parameter names
 /// * `shapes` - Original tensor shapes
 /// * `params` - Flattened parameter values
 ///
 /// # Returns
 ///
-/// PyDict containing PyTorch tensors with updated values
+/// `PyDict` containing PyTorch tensors with updated values
 fn apply_params(
     py: Python<'_>,
     keys: &[String],

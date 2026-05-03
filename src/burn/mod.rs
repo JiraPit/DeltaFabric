@@ -10,41 +10,52 @@ use crate::core::{
 };
 use anyhow::{Context, Result};
 use burn::module::{Module, ModuleMapper, ModuleVisitor, Param};
-use burn::tensor::Tensor;
+use burn::tensor::backend::Backend;
+use burn::tensor::{Tensor, TensorData};
 use std::collections::HashMap;
 use tracing::{info, warn};
 
-/// Extracts all learnable parameters from a Burn model into a flat vector.
+/// Extracts all learnable parameters and buffers from a Burn model into a flat vector.
+///
+/// Uses visitation order to ensure deterministic flattening across nodes.
 ///
 /// # Arguments
 ///
-/// * `model` - The model to extract parameters from
+/// * `model` - The Burn model to extract parameters from
 ///
 /// # Returns
 ///
-/// Vector of f32 values containing all model parameters in order.
-pub(crate) fn extract_params<M: Module<B>, B: burn::tensor::backend::Backend>(
-    model: &M,
-) -> Vec<f32> {
+/// Flat vector of all parameter values in deterministic order.
+pub(crate) fn extract_params<M: Module<B>, B: Backend>(model: &M) -> Vec<f32> {
     let mut collector = ParamCollector { data: Vec::new() };
     model.visit(&mut collector);
     collector.data
 }
 
+struct ParamCollector {
+    data: Vec<f32>,
+}
+
+impl<B: Backend> ModuleVisitor<B> for ParamCollector {
+    fn visit_float<const D: usize>(&mut self, param: &Param<Tensor<B, D>>) {
+        let values: Vec<f32> = param.val().to_data().into_vec::<f32>().unwrap();
+        self.data.extend(values);
+    }
+}
+
 /// Applies a flat parameter vector to a Burn model, returning the updated model.
+///
+/// Uses the same visitation order to ensure deterministic unflattening.
 ///
 /// # Arguments
 ///
-/// * `model` - The model to update (taken by value)
-/// * `params` - Flat vector of f32 values to apply
+/// * `model` - The Burn model to update
+/// * `params` - Flat vector of parameter values
 ///
 /// # Returns
 ///
-/// Model with parameters replaced by the provided values.
-pub(crate) fn apply_params<M: Module<B>, B: burn::tensor::backend::Backend>(
-    model: M,
-    params: &[f32],
-) -> M {
+/// The updated model with new parameter values applied.
+pub(crate) fn apply_params<M: Module<B>, B: Backend>(model: M, params: &[f32]) -> M {
     let mut setter = ParamSetter {
         data: params.to_vec(),
         pos: 0,
@@ -52,36 +63,28 @@ pub(crate) fn apply_params<M: Module<B>, B: burn::tensor::backend::Backend>(
     model.map(&mut setter)
 }
 
-struct ParamCollector {
-    data: Vec<f32>,
-}
-
-impl<B: burn::tensor::backend::Backend> ModuleVisitor<B> for ParamCollector {
-    fn visit_float<const D: usize>(&mut self, param: &Param<Tensor<B, D>>) {
-        let values: Vec<f32> = param.val().to_data().into_vec().unwrap();
-        self.data.extend(values);
-    }
-}
-
 struct ParamSetter {
     data: Vec<f32>,
     pos: usize,
 }
 
-impl<B: burn::tensor::backend::Backend> ModuleMapper<B> for ParamSetter {
+impl<B: Backend> ModuleMapper<B> for ParamSetter {
     fn map_float<const D: usize>(&mut self, param: Param<Tensor<B, D>>) -> Param<Tensor<B, D>> {
-        let num_elements = param.val().dims().iter().product::<usize>();
-        let end_pos = self.pos + num_elements;
-        let tensor_data = self.data[self.pos..end_pos.min(self.data.len())].to_vec();
+        let shape = param.val().dims();
+        let num_elements = shape.iter().product::<usize>();
+        let end_pos = (self.pos + num_elements).min(self.data.len());
+        let tensor_data = self.data[self.pos..end_pos].to_vec();
         self.pos = end_pos;
 
-        let shape = param.val().dims().to_vec();
-        let new_tensor = Tensor::<B, D>::from_data(
-            burn::tensor::TensorData::new(tensor_data, shape),
-            &param.val().device(),
-        );
+        let old_tensor = param.val();
+        let new_data_tensor =
+            Tensor::<B, D>::from_data(TensorData::new(tensor_data, shape), &old_tensor.device());
 
-        param.map(|_| new_tensor)
+        // Perform an additive update to preserve the Autodiff flags (e.g., requires_grad).
+        // Direct replacement via from_data would strip gradient tracking metadata.
+        let updated_tensor = old_tensor.clone().sub(old_tensor).add(new_data_tensor);
+
+        param.map(|_| updated_tensor)
     }
 }
 
@@ -166,12 +169,43 @@ impl Fabric {
     /// # Returns
     ///
     /// Updated model with synced parameters applied.
-    pub async fn step<B: burn::tensor::backend::Backend, M: burn::module::Module<B>>(
-        &mut self,
-        model: M,
-    ) -> Result<M> {
+    pub async fn step<B: Backend, M: Module<B>>(&mut self, model: M) -> Result<M> {
         self.step_count += 1;
         let step_count = self.step_count;
+        let my_id = self.session.node.id;
+        let sync_interval = self.config.sync_interval;
+
+        let mut aggregator: HashMap<u32, f32> = HashMap::new();
+        let mut relay_updates: HashMap<u64, SparseDelta> = HashMap::new();
+
+        for sample in self.session.pull_packets() {
+            let payload = sample.payload().to_bytes();
+            match access_archived_packet(&payload) {
+                Ok(incoming) => {
+                    if let Some(updates) = process_deltas(
+                        &mut aggregator,
+                        incoming,
+                        &mut self.seen_table,
+                        self.config.alpha,
+                        self.config.relay_threshold,
+                        my_id,
+                    ) {
+                        relay_updates.extend(updates);
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to deserialize incoming packet");
+                }
+            }
+        }
+
+        let is_sync_step = step_count.is_multiple_of(sync_interval);
+        let has_peer_updates = !aggregator.is_empty();
+        let need_active = self.anchor_weights.is_empty() || has_peer_updates || is_sync_step;
+
+        if !need_active {
+            return Ok(model);
+        }
 
         let mut active_flat = extract_params(&model);
 
@@ -184,44 +218,18 @@ impl Fabric {
             );
         }
 
-        let mut aggregator: HashMap<u32, f32> = HashMap::new();
-        let mut relay_updates: HashMap<u64, SparseDelta> = HashMap::new();
-
-        for sample in self.session.pull_packets() {
-            let payload = sample.payload().to_bytes();
-            match access_archived_packet(&payload) {
-                Ok(incoming) => {
-                    info!(node_id = %self.session.node.id, "Received delta packet");
-                    if let Some(updates) = process_deltas(
-                        &mut aggregator,
-                        incoming,
-                        &mut self.seen_table,
-                        self.config.alpha,
-                        self.config.relay_threshold,
-                    ) {
-                        relay_updates.extend(updates);
-                    }
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to deserialize incoming packet");
-                }
-            }
+        if has_peer_updates {
+            info!(node_id = %my_id, count = %aggregator.len(), "Applying peer deltas");
+            apply_deltas(&mut active_flat, &mut self.anchor_weights, &aggregator);
         }
 
-        let num_peer_updates = aggregator.len();
-        if num_peer_updates > 0 {
-            info!(node_id = %self.session.node.id, count = %num_peer_updates, "Applying peer deltas");
-        }
-
-        apply_deltas(&mut active_flat, &mut self.anchor_weights, &aggregator);
-
-        if step_count.is_multiple_of(self.config.sync_interval) {
+        if is_sync_step {
             self.local_sequence += 1;
             if let Some(delta) = generate_local_delta(
                 &active_flat,
                 &mut self.anchor_weights,
                 self.config.delta_selection_ratio,
-                self.session.node.id,
+                my_id,
                 self.local_sequence,
             ) {
                 info!(
@@ -230,7 +238,7 @@ impl Fabric {
                     num_indices = %delta.indices.len(),
                     "Generated local delta"
                 );
-                relay_updates.insert(self.session.node.id, delta);
+                relay_updates.insert(my_id, delta);
             }
         }
 
@@ -244,8 +252,11 @@ impl Fabric {
                 .context("Failed to broadcast packet")?;
         }
 
-        let model = apply_params(model, &active_flat);
-        Ok(model)
+        if has_peer_updates {
+            Ok(apply_params(model, &active_flat))
+        } else {
+            Ok(model)
+        }
     }
 
     /// Shuts down the Fabric, closing all network connections.

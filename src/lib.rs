@@ -1,5 +1,10 @@
 pub mod core;
 
+#[cfg(all(feature = "burn", feature = "pytorch"))]
+compile_error!(
+    "Features 'burn' and 'pytorch' are mutually exclusive and cannot be enabled together."
+);
+
 #[cfg(feature = "burn")]
 pub mod burn;
 

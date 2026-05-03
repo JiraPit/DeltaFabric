@@ -197,7 +197,8 @@ impl Session {
         let samples_ref = self.delta_samples.clone();
         for peer_id in &self.node.peers {
             let samples = samples_ref.clone();
-            let sub = self.zenoh
+            let sub = self
+                .zenoh
                 .declare_subscriber(format!("node/{}/delta", peer_id))
                 .callback(move |sample| {
                     if let Ok(mut guard) = samples.lock() {

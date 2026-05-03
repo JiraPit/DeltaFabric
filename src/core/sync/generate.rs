@@ -1,5 +1,5 @@
 use crate::core::packet::SparseDelta;
-use tracing::{debug, trace};
+use tracing::debug;
 
 /// Generates a sparse delta from the difference between active and anchor weights.
 ///
@@ -51,7 +51,6 @@ pub fn generate_local_delta(
         debug!("No significant deltas to share");
         None
     } else {
-        trace!(num_indices = %indices.len(), seq = %seq, "Generated local delta");
         Some(SparseDelta {
             sequence_id: seq,
             indices,

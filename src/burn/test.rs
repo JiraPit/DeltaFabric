@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod burn_tests {
-    use crate::burn::{apply_params, extract_params};
+    use crate::burn::{Fabric, apply_params, extract_params};
+    use crate::core::config::Config;
     use burn::nn::Linear;
     use burn::nn::LinearConfig;
     use burn::tensor::backend::Backend;
@@ -10,6 +11,10 @@ mod burn_tests {
 
     fn create_test_model<B: Backend>(device: &B::Device) -> Linear<B> {
         LinearConfig::new(3, 2).init(device)
+    }
+
+    fn create_test_config() -> Config {
+        Config::default()
     }
 
     #[test]
@@ -95,5 +100,77 @@ mod burn_tests {
         let large: Linear<TestBackend> = LinearConfig::new(1024, 512).init(&device);
         let params_large = extract_params(&large);
         assert_eq!(params_large.len(), 1024 * 512 + 512);
+    }
+
+    #[test]
+    fn test_need_active_optimization_no_activity() {
+        let device = <TestBackend as Backend>::Device::default();
+        let model = create_test_model::<TestBackend>(&device);
+        let config = create_test_config();
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let mut fabric = Fabric::new(1, config).await.unwrap();
+            fabric.anchor_weights = vec![0.0; 8];
+
+            let original_params = extract_params(&model);
+
+            let result = fabric.step(model).await.unwrap();
+
+            let result_params = extract_params(&result);
+            assert_eq!(result_params, original_params);
+            assert!(fabric.seen_table.is_empty());
+        });
+    }
+
+    #[test]
+    fn test_anchor_weights_initialization() {
+        let device = <TestBackend as Backend>::Device::default();
+        let model = create_test_model::<TestBackend>(&device);
+        let config = create_test_config();
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let mut fabric = Fabric::new(1, config).await.unwrap();
+            assert!(fabric.anchor_weights.is_empty());
+
+            let _result = fabric.step(model).await.unwrap();
+
+            assert!(!fabric.anchor_weights.is_empty());
+            assert_eq!(fabric.anchor_weights.len(), 8);
+        });
+    }
+
+    #[test]
+    fn test_step_count_increments() {
+        let device = <TestBackend as Backend>::Device::default();
+        let model = create_test_model::<TestBackend>(&device);
+        let config = create_test_config();
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let mut fabric = Fabric::new(1, config).await.unwrap();
+            assert_eq!(fabric.step_count, 0);
+
+            let _result = fabric.step(model).await.unwrap();
+            assert_eq!(fabric.step_count, 1);
+        });
+    }
+
+    #[test]
+    fn test_local_sequence_increments_on_sync_step() {
+        let device = <TestBackend as Backend>::Device::default();
+        let model = create_test_model::<TestBackend>(&device);
+        let mut config = create_test_config();
+        config.sync_interval = 2;
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let mut fabric = Fabric::new(1, config).await.unwrap();
+            assert_eq!(fabric.local_sequence, 0);
+
+            let _result = fabric.step(model).await.unwrap();
+            assert_eq!(fabric.local_sequence, 0);
+
+            let model2 = create_test_model::<TestBackend>(&device);
+            let _result = fabric.step(model2).await.unwrap();
+            assert_eq!(fabric.local_sequence, 1);
+        });
     }
 }

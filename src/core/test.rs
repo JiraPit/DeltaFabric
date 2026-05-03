@@ -24,7 +24,7 @@ mod integration_tests {
         let mut aggregator: HashMap<u32, f32> = HashMap::new();
         let mut seen_table: HashMap<u64, u64> = HashMap::new();
 
-        let relay = process_deltas(&mut aggregator, archived, &mut seen_table, 1.0, 0.0);
+        let relay = process_deltas(&mut aggregator, archived, &mut seen_table, 1.0, 0.0, 99);
         assert!(relay.is_some());
 
         let mut active_weights = active.clone();
@@ -66,8 +66,14 @@ mod integration_tests {
                 .unwrap();
         let archived_fresh = crate::core::access_archived_packet(&bytes_fresh).unwrap();
 
-        let relay_fresh =
-            process_deltas(&mut aggregator, archived_fresh, &mut seen_table, 1.0, 0.0);
+        let relay_fresh = process_deltas(
+            &mut aggregator,
+            archived_fresh,
+            &mut seen_table,
+            1.0,
+            0.0,
+            99,
+        );
         assert!(relay_fresh.is_some());
         assert_eq!(seen_table.get(&1), Some(&7));
 
@@ -76,8 +82,14 @@ mod integration_tests {
                 .unwrap();
         let archived_stale = crate::core::access_archived_packet(&bytes_stale).unwrap();
 
-        let relay_stale =
-            process_deltas(&mut aggregator, archived_stale, &mut seen_table, 1.0, 0.0);
+        let relay_stale = process_deltas(
+            &mut aggregator,
+            archived_stale,
+            &mut seen_table,
+            1.0,
+            0.0,
+            99,
+        );
         assert!(relay_stale.is_none());
         assert_eq!(seen_table.get(&2), Some(&10));
         assert_eq!(aggregator.len(), 1);
