@@ -1,7 +1,8 @@
+import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 from model import Model
 
@@ -17,8 +18,20 @@ torch.manual_seed(SEED)
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Single-node MNIST training")
+    parser.add_argument(
+        "--use-data",
+        type=float,
+        default=1.0,
+        help="Fraction of training data to use (0.0 to 1.0)",
+    )
+    args = parser.parse_args()
+
     print("Initializing single-node MNIST training")
     print(f"Epochs: {EPOCHS}, Batch size: {BATCH_SIZE}, LR: {LEARNING_RATE}")
+
+    num_train_samples = int(TRAIN_SAMPLES * args.use_data)
+    print(f"Using {num_train_samples} / {TRAIN_SAMPLES} training samples")
 
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
@@ -28,6 +41,10 @@ def main():
     train_dataset = datasets.MNIST(
         "./data", train=True, download=True, transform=transform
     )
+    if args.use_data < 1.0:
+        indices = list(range(num_train_samples))
+        train_dataset = Subset(train_dataset, indices)
+
     test_dataset = datasets.MNIST(
         "./data", train=False, download=False, transform=transform
     )
@@ -77,11 +94,11 @@ def main():
     print(f"Final test accuracy: {acc:.4f}")
     print(f"Average time per epoch: {total_elapsed / EPOCHS:.2f}s")
 
-    with open('epoch_times_single.txt', 'w') as f:
-        f.write(','.join(map(str, epoch_times)))
+    with open("epoch_times_single.txt", "w") as f:
+        f.write(",".join(map(str, epoch_times)))
 
-    with open('accuracy_single.txt', 'w') as f:
-        f.write(','.join(map(str, epoch_accuracies)))
+    with open("accuracy_single.txt", "w") as f:
+        f.write(",".join(map(str, epoch_accuracies)))
 
 
 if __name__ == "__main__":

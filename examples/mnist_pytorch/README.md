@@ -90,6 +90,17 @@ fabric.close()
 | `sync_interval`         | 100     | Broadcast delta every N steps    |
 | `relay_threshold`       | 1e-6    | Minimum delta to relay           |
 
+## Script Arguments
+
+The example scripts support the following command-line arguments:
+
+| Parameter    | Default | Description                                      |
+| ------------ | ------- | ------------------------------------------------ |
+| `--alpha`         | 0.25    | Overrides the default `alpha` in `Config`         |
+| `--sync-interval` | 100     | Overrides the default `sync_interval` in `Config` |
+| `--delta-selection-ratio` | 0.01    | Overrides the default `delta_selection_ratio` in `Config` |
+| `--use-data`      | 1.0     | Fraction of training data to use (0.0 to 1.0)     |
+
 ## Data Split
 
 Training uses the full MNIST dataset (60,000 samples).

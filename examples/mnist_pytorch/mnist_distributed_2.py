@@ -1,5 +1,4 @@
 import os
-import sys
 import argparse
 import torch
 import torch.nn as nn
@@ -17,7 +16,6 @@ EPOCHS = 5
 LEARNING_RATE = 0.01
 NUM_NODES = 2
 TRAIN_SAMPLES = 60000
-TRAIN_SAMPLES_PER_NODE = TRAIN_SAMPLES // NUM_NODES
 
 torch.manual_seed(SEED)
 
@@ -41,25 +39,53 @@ def parse_peers(peers_str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Distributed MNIST training with DeltaFabric')
-    parser.add_argument('--alpha', type=float, default=0.25, help='Alpha value for DeltaFabric config')
+    parser = argparse.ArgumentParser(
+        description="Distributed MNIST training with DeltaFabric"
+    )
+    parser.add_argument(
+        "--alpha", type=float, default=0.25, help="Alpha value for DeltaFabric config"
+    )
+    parser.add_argument(
+        "--sync-interval",
+        type=int,
+        default=100,
+        help="Steps between DeltaFabric syncs",
+    )
+    parser.add_argument(
+        "--delta-selection-ratio",
+        type=float,
+        default=0.01,
+        help="Delta selection ratio for DeltaFabric config",
+    )
+    parser.add_argument(
+        "--use-data",
+        type=float,
+        default=1.0,
+        help="Fraction of training data to use (0.0 to 1.0)",
+    )
     args = parser.parse_args()
 
     node_id = int(os.environ["DF_NODE_ID"])
     peers_str = os.environ.get("DF_PEERS", "")
     peers = parse_peers(peers_str)
 
-    partition_start = (node_id - 1) * TRAIN_SAMPLES_PER_NODE
-    partition_end = partition_start + TRAIN_SAMPLES_PER_NODE
+    actual_train_samples = int(TRAIN_SAMPLES * args.use_data)
+    train_samples_per_node = actual_train_samples // NUM_NODES
+
+    partition_start = (node_id - 1) * train_samples_per_node
+    partition_end = partition_start + train_samples_per_node
 
     print(f"Node {node_id}: Starting with peers {peers}")
     print(
-        f"Node {node_id}: Partition {partition_start} - {partition_end} ({TRAIN_SAMPLES_PER_NODE} samples)"
+        f"Node {node_id}: Partition {partition_start} - {partition_end} ({train_samples_per_node} samples)"
     )
 
     global fabric
     config = Config(
-        peers=peers, alpha=args.alpha, sync_interval=100, delta_selection_ratio=0.01
+        peers=peers,
+        alpha=args.alpha,
+        sync_interval=args.sync_interval,
+        delta_selection_ratio=args.delta_selection_ratio,
     )
     fabric = Fabric(node_id=node_id, config=config)
 
@@ -101,7 +127,7 @@ def main():
             loss.backward()
             optimizer.step()
 
-            old_weights = {k: v.clone() for k, v in model.state_dict().items()}
+            {k: v.clone() for k, v in model.state_dict().items()}
             model = fabric.step(model)
 
         model.eval()
@@ -126,11 +152,11 @@ def main():
     print(f"Node {node_id}: Training complete")
     print(f"Node {node_id}: Average time per epoch: {total_elapsed / EPOCHS:.2f}s")
 
-    with open(f'epoch_times_dist2_node_{node_id}.txt', 'w') as f:
-        f.write(','.join(map(str, epoch_times)))
+    with open(f"epoch_times_dist2_node_{node_id}.txt", "w") as f:
+        f.write(",".join(map(str, epoch_times)))
 
-    with open(f'accuracy_dist2_node_{node_id}_alpha_{config.alpha}.txt', 'w') as f:
-        f.write(','.join(map(str, epoch_accuracies)))
+    with open(f"accuracy_dist2_node_{node_id}_alpha_{config.alpha}.txt", "w") as f:
+        f.write(",".join(map(str, epoch_accuracies)))
 
     fabric.close()
     print(f"Node {node_id}: Shutdown complete")
