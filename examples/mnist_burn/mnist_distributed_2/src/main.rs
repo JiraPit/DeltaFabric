@@ -222,7 +222,6 @@ async fn main() -> Result<()> {
     tch::manual_seed(SEED as i64);
 
     let mut model: Model<Autodiff<LibTorch<f32>>> = Model::new(&device);
-    tracing::info!(num_params = %model.num_params(), "Model initialized");
 
     tracing::info!("Loading MNIST data...");
     let test_dataset = MnistDataset::test();
@@ -235,7 +234,10 @@ async fn main() -> Result<()> {
 
     tracing::info!("Starting training with DeltaFabric sync...");
 
+    let mut epoch_times = Vec::new();
+
     for epoch in 0..EPOCHS {
+        let start_time = std::time::Instant::now();
         let dataset = MnistDataset::train();
         let shuffled_indices = shuffle_indices(SEED, TRAIN_SAMPLES);
         let my_indices: Vec<usize> = shuffled_indices
@@ -249,6 +251,9 @@ async fn main() -> Result<()> {
                 .await?;
         model = new_model;
 
+        let elapsed = start_time.elapsed();
+        epoch_times.push(elapsed.as_secs_f64());
+
         // Use eval() for accuracy to avoid updating BatchNorm statistics
         let acc = accuracy(&model.clone().valid(), &test_dataset, &device);
 
@@ -261,6 +266,10 @@ async fn main() -> Result<()> {
     }
 
     tracing::info!(node_id = %node_id, "Training complete");
+
+    let times_str: Vec<String> = epoch_times.iter().map(|t| t.to_string()).collect();
+    let content = times_str.join(",");
+    std::fs::write(format!("epoch_times_dist2_node_{}.txt", node_id), content).unwrap();
 
     fabric.shutdown().await?;
 

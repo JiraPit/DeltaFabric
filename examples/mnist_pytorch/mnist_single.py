@@ -44,6 +44,7 @@ def main():
     print("Starting training...")
 
     total_elapsed = 0
+    epoch_times = []
     for epoch in range(EPOCHS):
         start_time = time.time()
         model.train()
@@ -67,11 +68,15 @@ def main():
         acc = correct / total
         elapsed = time.time() - start_time
         total_elapsed += elapsed
+        epoch_times.append(elapsed)
         print(f"Epoch {epoch + 1}: Accuracy = {acc:.4f}, Time = {elapsed:.2f}s")
 
     print("Training complete")
     print(f"Final test accuracy: {acc:.4f}")
     print(f"Average time per epoch: {total_elapsed / EPOCHS:.2f}s")
+
+    with open('epoch_times_single.txt', 'w') as f:
+        f.write(','.join(map(str, epoch_times)))
 
 
 if __name__ == "__main__":

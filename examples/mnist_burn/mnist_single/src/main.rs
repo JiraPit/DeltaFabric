@@ -70,11 +70,13 @@ pub fn train<B: AutodiffBackend>(
     dataset: &MnistDataset,
     device: &B::Device,
     num_epochs: usize,
-) {
+) -> Vec<f64> {
     let config = SgdConfig::new();
     let mut optimizer = config.init();
+    let mut epoch_times = Vec::new();
 
     for epoch in 0..num_epochs {
+        let start_time = std::time::Instant::now();
         let num_batches = TRAIN_SAMPLES / BATCH_SIZE;
         let mut total_loss: f64 = 0.0;
 
@@ -90,9 +92,12 @@ pub fn train<B: AutodiffBackend>(
             *model = optimizer.step(LEARNING_RATE, model.clone(), grads);
         }
 
+        let elapsed = start_time.elapsed();
+        epoch_times.push(elapsed.as_secs_f64());
         let avg_loss = total_loss / num_batches as f64;
         tracing::info!(epoch = %epoch, loss = %avg_loss, "Epoch complete");
     }
+    epoch_times
 }
 
 pub fn accuracy<B: Backend>(model: &Model<B>, dataset: &MnistDataset, device: &B::Device) -> f64 {
@@ -135,7 +140,6 @@ fn main() -> Result<()> {
     );
 
     let mut model: Model<Autodiff<LibTorch<f32>>> = Model::new(&device);
-    tracing::info!(num_params = %model.num_params(), "Model initialized");
 
     tracing::info!("Loading MNIST data...");
     let train_dataset = MnistDataset::train();
@@ -150,9 +154,13 @@ fn main() -> Result<()> {
 
     tracing::info!("Starting training...");
 
-    train(&mut model, &train_dataset, &device, EPOCHS);
+    let epoch_times = train(&mut model, &train_dataset, &device, EPOCHS);
 
     tracing::info!("Training complete");
+
+    let times_str: Vec<String> = epoch_times.iter().map(|t| t.to_string()).collect();
+    let content = times_str.join(",");
+    std::fs::write("epoch_times_single.txt", content).unwrap();
 
     let acc = accuracy(&model, &test_dataset, &device);
     tracing::info!(accuracy = %acc, "Final test accuracy");

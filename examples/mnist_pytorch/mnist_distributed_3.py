@@ -89,6 +89,7 @@ def main():
     train_loader = DataLoader(node_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
     total_elapsed = 0
+    epoch_times = []
     for epoch in range(EPOCHS):
         start_time = time.time()
         model.train()
@@ -101,16 +102,6 @@ def main():
 
             old_weights = {k: v.clone() for k, v in model.state_dict().items()}
             model = fabric.step(model)
-
-            # Calculate total number of changed elements
-            changed_elements = 0
-            for k in old_weights:
-                changed_elements += torch.sum(
-                    model.state_dict()[k] != old_weights[k]
-                ).item()
-
-            if changed_elements > 0:
-                print(f"SYNC: Applied updates to {int(changed_elements)} parameters")
 
         model.eval()
         correct = 0
@@ -125,12 +116,16 @@ def main():
         acc = correct / total
         elapsed = time.time() - start_time
         total_elapsed += elapsed
+        epoch_times.append(elapsed)
         print(
             f"Node {node_id}, Epoch {epoch + 1}: Accuracy = {acc:.4f}, Time = {elapsed:.2f}s"
         )
 
     print(f"Node {node_id}: Training complete")
     print(f"Node {node_id}: Average time per epoch: {total_elapsed / EPOCHS:.2f}s")
+
+    with open(f'epoch_times_dist3_node_{node_id}.txt', 'w') as f:
+        f.write(','.join(map(str, epoch_times)))
 
     fabric.close()
     print(f"Node {node_id}: Shutdown complete")
