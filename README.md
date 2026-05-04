@@ -5,12 +5,20 @@ A decentralized weight synchronization protocol for distributed ML training with
 ## Example Flow
 
 ### Example Topology
-The ring topology below represents a minimal DeltaFabric cluster where each node connects to **exactly one peer** for direct synchronization:
-<img src="visualization/example_topology.png" width="75%" alt="Ring Topology">
+
+The ring topology below represents a minimal DeltaFabric cluster where each node connects to **exactly one peer**:
+
+<div align="center">
+  <img src="visualization/example_topology.png" width="75%" alt="Ring Topology">
+</div>
 
 ### Synchronization Flow (Ring Topology)
-This sequence diagram illustrates the weight delta synchronization process **exclusively for the ring topology** shown above:
-<img src="visualization/example_flow.svg" width="75%" alt="Synchronization Flow">
+
+This sequence diagram illustrates the weight delta synchronization process for the ring topology:
+
+<div align="center">
+  <img src="visualization/example_flow.svg" width="75%" alt="Synchronization Flow">
+</div>
 
 ## Core Concepts
 
