@@ -45,6 +45,7 @@ def main():
 
     total_elapsed = 0
     epoch_times = []
+    epoch_accuracies = []
     for epoch in range(EPOCHS):
         start_time = time.time()
         model.train()
@@ -66,6 +67,7 @@ def main():
                 total += targets.size(0)
 
         acc = correct / total
+        epoch_accuracies.append(acc)
         elapsed = time.time() - start_time
         total_elapsed += elapsed
         epoch_times.append(elapsed)
@@ -77,6 +79,9 @@ def main():
 
     with open('epoch_times_single.txt', 'w') as f:
         f.write(','.join(map(str, epoch_times)))
+
+    with open('accuracy_single.txt', 'w') as f:
+        f.write(','.join(map(str, epoch_accuracies)))
 
 
 if __name__ == "__main__":

@@ -59,7 +59,7 @@ def main():
 
     # Top chart: Median duration per node (grouped by run type)
     df = pd.DataFrame(raw_data)
-    sns.barplot(data=df, x='run_type', y='median_time', hue='node', ax=ax1)
+    sns.barplot(data=df, x='run_type', y='median_time', hue='node', ax=ax1, order=['single', 'dist2', 'dist3'])
     ax1.set_title('Median Epoch Duration by Run Type and Node')
     ax1.set_xlabel('Run Type')
     ax1.set_ylabel('Median Epoch Duration (seconds)')
@@ -76,7 +76,7 @@ def main():
             speedup_data.append({'run_type': run, 'speedup': speedup})
         df_speedup = pd.DataFrame(speedup_data)
 
-        sns.barplot(data=df_speedup, x='run_type', y='speedup', ax=ax2)
+        sns.barplot(data=df_speedup, x='run_type', y='speedup', ax=ax2, order=['single', 'dist2', 'dist3'])
         ax2.set_title('Speedup Relative to Single Run (Baseline = 1)')
         ax2.set_xlabel('Run Type')
         ax2.set_ylabel('Speedup')

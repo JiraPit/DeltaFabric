@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -40,6 +41,10 @@ def parse_peers(peers_str):
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Distributed MNIST training with DeltaFabric')
+    parser.add_argument('--alpha', type=float, default=0.25, help='Alpha value for DeltaFabric config')
+    args = parser.parse_args()
+
     node_id = int(os.environ["DF_NODE_ID"])
     peers_str = os.environ.get("DF_PEERS", "")
     peers = parse_peers(peers_str)
@@ -54,7 +59,7 @@ def main():
 
     global fabric
     config = Config(
-        peers=peers, alpha=0.25, sync_interval=100, delta_selection_ratio=0.01
+        peers=peers, alpha=args.alpha, sync_interval=100, delta_selection_ratio=0.01
     )
     fabric = Fabric(node_id=node_id, config=config)
 
@@ -85,6 +90,7 @@ def main():
 
     total_elapsed = 0
     epoch_times = []
+    epoch_accuracies = []
     for epoch in range(EPOCHS):
         start_time = time.time()
         model.train()
@@ -109,6 +115,7 @@ def main():
                 correct += (predictions == targets).sum().item()
                 total += targets.size(0)
         acc = correct / total
+        epoch_accuracies.append(acc)
         elapsed = time.time() - start_time
         total_elapsed += elapsed
         epoch_times.append(elapsed)
@@ -121,6 +128,9 @@ def main():
 
     with open(f'epoch_times_dist2_node_{node_id}.txt', 'w') as f:
         f.write(','.join(map(str, epoch_times)))
+
+    with open(f'accuracy_dist2_node_{node_id}_alpha_{config.alpha}.txt', 'w') as f:
+        f.write(','.join(map(str, epoch_accuracies)))
 
     fabric.close()
     print(f"Node {node_id}: Shutdown complete")
