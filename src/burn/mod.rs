@@ -80,11 +80,7 @@ impl<B: Backend> ModuleMapper<B> for ParamSetter {
         let new_data_tensor =
             Tensor::<B, D>::from_data(TensorData::new(tensor_data, shape), &old_tensor.device());
 
-        // Perform an additive update to preserve the Autodiff flags (e.g., requires_grad).
-        // Direct replacement via from_data would strip gradient tracking metadata.
-        let updated_tensor = old_tensor.clone().sub(old_tensor).add(new_data_tensor);
-
-        param.map(|_| updated_tensor)
+        param.map(|_| new_data_tensor)
     }
 }
 

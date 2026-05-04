@@ -1,0 +1,29 @@
+sequenceDiagram
+    participant N1 as Node 1
+    participant N2 as Node 2
+    participant N3 as Node 3
+
+    Note over N1, N3: 0 - Initialize models with the same W_active and W_anchor
+
+    par
+        Note over N1, N3: 1 - Distributed training
+        N1->>N1: Update W_active with gradients
+        N2->>N2: Update W_active with gradients
+        N3->>N3: Update W_active with gradients
+    end
+
+    rect rgba(200, 180, 255, 0.1)
+        Note over N1, N3: 2 - Sync interval hit
+        N1->>N1: D1 = top_k(W_active1 - W_anchor1)
+        N1->>N2: Send D1 to peers (1->2)
+        N2->>N2: W_active2, W_anchor2 += αD1
+        N2->>N2: D2 = top_k(W_active2 - W_anchor2)
+        N2->>N3: Send [αD1, D2] to peers (2->3)
+        N3->>N3: W_active3, W_anchor3 += α²D1 + αD2
+        N3->>N3: D3 = top_k(W_active3 - W_anchor3)
+        N3->>N1: Send [α²D1, αD2, D3] to peers (3->1)
+        N1->>N1: W_active1, W_anchor1 += α²D2 + αD3
+    end
+
+    Note over N1, N3: 3 - Continue distributed training until the next sync interval
+

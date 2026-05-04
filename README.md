@@ -2,6 +2,16 @@
 
 A decentralized weight synchronization protocol for distributed ML training with built-in networking. Currently supporting PyTorch and Burn.
 
+## Example Flow
+
+### Example Topology
+The ring topology below represents a minimal DeltaFabric cluster where each node connects directly to its peers:
+![Ring Topology](visualization/example_topology.png)
+
+### Example Flow Diagram
+The following sequence diagram illustrates the weight delta synchronization process between nodes:
+![Synchronization Flow](visualization/example_flow.svg)
+
 ## Core Concepts
 
 ### No-Master Architecture

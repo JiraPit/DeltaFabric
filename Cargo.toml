@@ -10,7 +10,7 @@ pytorch = ["pyo3"]
 
 [dependencies]
 anyhow = "1.0.102"
-burn = { version = "0.20.1", optional = true, default-features = false }
+burn = { version = "0.20.1", optional = true, default-features = false, features = ["autodiff"] }
 pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
 rkyv = { version = "0.8.15", features = ["unaligned"] }
 serde = { version = "1.0.228", features = ["derive"] }
