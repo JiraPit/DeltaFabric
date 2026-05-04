@@ -59,7 +59,7 @@ DF_NODE_ID=3 DF_PEERS=1,2 python mnist_distributed_3.py
 ```python
 from delta_fabric import Fabric, Config
 
-# 1. Create config with sensible defaults
+# 1. Create config with defaults
 config = Config(peers=[2, 3])
 fabric = Fabric(node_id=1, config=config)
 
@@ -85,7 +85,7 @@ fabric.close()
 
 | Parameter               | Default | Description                     |
 | ----------------------- | ------- | ------------------------------- |
-| `alpha`                 | 0.5     | Blend factor for remote deltas    |
+| `alpha`                 | 0.1     | Blend factor for remote deltas    |
 | `delta_selection_ratio` | 0.01    | Only sync 1% of changed weights  |
 | `sync_interval`         | 100     | Broadcast delta every N steps    |
 | `relay_threshold`       | 1e-6    | Minimum delta to relay           |
