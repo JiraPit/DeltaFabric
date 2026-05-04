@@ -10,9 +10,7 @@ The ring topology below represents a minimal DeltaFabric cluster where each node
   <img src="visualization/example_topology.png" width="75%" alt="Ring Topology">
 </div>
 
-This sequence diagram illustrates the weight delta synchronization process for the ring topology:
-
-All nodes start with identical weight buffers and train locally in parallel. When a node hits its sync interval, it computes a compressed delta and sends it to its single peer. Each peer applies the attenuated delta to its own weights and relays it forward until it circulates back to the originator or the delta gets too small (< relay_threshold).
+This sequence diagram illustrates the weight delta synchronization process for the ring topology. All nodes start with identical weight buffers and train locally in parallel. When a node hits its sync interval, it computes a compressed delta and sends it to its single peer. Each peer applies the attenuated delta to its own weights and relays it forward until it circulates back to the originator or the delta gets too small (< relay_threshold).
 
 <div align="center">
   <img src="visualization/example_flow.svg" width="75%" alt="Synchronization Flow">
