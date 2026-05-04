@@ -59,7 +59,7 @@ DF_NODE_ID=3 DF_PEERS=1,2 python mnist_distributed_3.py
 ```python
 from delta_fabric import Fabric, Config
 
-# 1. Create config with defaults
+# 1. Create a fabric. This waits for other modules to be ready.
 config = Config(peers=[2, 3])
 fabric = Fabric(node_id=1, config=config)
 
