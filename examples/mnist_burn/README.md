@@ -54,6 +54,7 @@ DF_NODE_ID=3 DF_PEERS=1,2 cargo run -p mnist_distributed_3
 ```rust
 use delta_fabric::{Config, Fabric};
 
+// Create a fabric. This waits for other modules to be ready.
 let config = Config::new(peers);
 let mut fabric = Fabric::new(node_id, config).await?;
 
@@ -68,6 +69,7 @@ for batch in dataset {
     model = fabric.step(model).await?;
 }
 
+// Shutdown
 fabric.shutdown().await?;
 ```
 
@@ -75,7 +77,7 @@ fabric.shutdown().await?;
 
 | Parameter               | Default | Description                     |
 | ----------------------- | ------- | ------------------------------- |
-| `alpha`                 | 0.5     | Blend factor for remote deltas  |
+| `alpha`                 | 0.1     | Blend factor for remote deltas  |
 | `delta_selection_ratio` | 0.01    | Only sync 1% of changed weights |
 | `sync_interval`         | 100     | Broadcast delta every N steps   |
 | `relay_threshold`       | 1e-6    | Minimum delta to relay          |
