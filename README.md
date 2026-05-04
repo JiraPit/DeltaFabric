@@ -4,7 +4,7 @@ A decentralized weight synchronization protocol for distributed ML training with
 
 ## Example Setup
 
-The ring topology below represents a minimal DeltaFabric cluster where each node connects to **exactly one peer**:
+The ring topology below represents a minimal DeltaFabric cluster where each node connects to only one peer:
 
 <div align="center">
   <img src="visualization/example_topology.png" width="75%" alt="Ring Topology">
