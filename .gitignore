@@ -38,7 +38,7 @@ release/
 /docs/
 
 # Datasets
-examples/mnist_pytorch/data/
+examples/**/data/
 *.pt
 *.pth
 *.tar.gz
