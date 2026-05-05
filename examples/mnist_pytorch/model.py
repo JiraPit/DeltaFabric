@@ -2,6 +2,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# Helper class for creating convolutional blocks with norm and optional pooling.
+# [NOTE] This is example helper function, not part of DeltaFabric usage.
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, pool=True):
         super().__init__()
@@ -36,5 +38,7 @@ class Model(nn.Module):
         x = self.fc3(x)
         return x
 
+    # Count total number of trainable parameters in the model.
+    # [NOTE] This is example helper function, not part of DeltaFabric usage.
     def num_params(self):
         return sum(p.numel() for p in self.parameters())

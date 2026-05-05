@@ -20,6 +20,8 @@ TRAIN_SAMPLES = 60000
 torch.manual_seed(SEED)
 
 
+# Wraps a dataset to index into specific indices (for data partitioning).
+# [NOTE] This is example helper function, not part of DeltaFabric usage.
 class IndexedDataset(Dataset):
     def __init__(self, base_dataset, indices):
         self.base_dataset = base_dataset
@@ -32,6 +34,8 @@ class IndexedDataset(Dataset):
         return self.base_dataset[self.indices[idx]]
 
 
+# Parse comma-separated peer node IDs from environment variable.
+# [NOTE] This is example helper function, not part of DeltaFabric usage.
 def parse_peers(peers_str):
     if not peers_str:
         return []

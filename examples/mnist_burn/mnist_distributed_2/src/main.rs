@@ -1,5 +1,3 @@
-use std::env;
-
 use anyhow::Result;
 use burn::backend::Autodiff;
 use burn::{
@@ -12,6 +10,7 @@ use burn::{
 use burn_tch::{LibTorch, LibTorchDevice};
 use delta_fabric::{Config, Fabric};
 use mnist_shared::{MnistBatch, Model};
+use std::env;
 
 const BATCH_SIZE: usize = 32;
 const EPOCHS: usize = 5;
@@ -22,6 +21,8 @@ const TRAIN_SAMPLES: usize = 60000;
 const TRAIN_SAMPLES_PER_NODE: usize = TRAIN_SAMPLES / NUM_NODES;
 const SEED: u64 = 42;
 
+/// Deterministic shuffle of indices using a seed (for reproducible data partitioning).
+/// [NOTE] This is example helper function, not part of DeltaFabric usage.
 fn shuffle_indices(seed: u64, count: usize) -> Vec<usize> {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -38,6 +39,8 @@ fn shuffle_indices(seed: u64, count: usize) -> Vec<usize> {
     indices
 }
 
+/// Initialize tracing/logging for the example.
+/// [NOTE] This is example helper function, not part of DeltaFabric usage.
 pub fn init_tracing() {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -50,6 +53,8 @@ pub fn init_tracing() {
         .init();
 }
 
+/// Parse comma-separated peer node IDs from environment variable.
+/// [NOTE] This is example helper function, not part of DeltaFabric usage.
 fn parse_peers(peers_str: &str) -> Vec<u64> {
     peers_str
         .split(',')
@@ -57,12 +62,16 @@ fn parse_peers(peers_str: &str) -> Vec<u64> {
         .collect()
 }
 
+/// Calculate the data partition range for a given node ID.
+/// [NOTE] This is example helper function, not part of DeltaFabric usage.
 fn get_partition_range(node_id: u64) -> (usize, usize) {
     let start = ((node_id - 1) as usize) * TRAIN_SAMPLES_PER_NODE;
     let end = start + TRAIN_SAMPLES_PER_NODE;
     (start, end)
 }
 
+/// Load a batch of MNIST images and labels using pre-shuffled indices.
+/// [NOTE] This is example helper function, not part of DeltaFabric usage.
 pub fn load_batch_by_indices<B: Backend>(
     dataset: &MnistDataset,
     indices: &[usize],
@@ -105,6 +114,8 @@ pub fn load_batch_by_indices<B: Backend>(
     Some(MnistBatch { images, targets })
 }
 
+/// Training loop demonstrating DeltaFabric framework usage (forward, backward, optimizer step, fabric.step()).
+/// The framework usage to focus on is: forward_classification, loss.backward(), optimizer.step(), fabric.step().
 pub async fn train<B: AutodiffBackend>(
     mut model: Model<B>,
     dataset: &MnistDataset,
@@ -146,6 +157,8 @@ pub async fn train<B: AutodiffBackend>(
     Ok((model, avg_loss))
 }
 
+/// Calculate model accuracy on a dataset.
+/// [NOTE] This is example helper function, not part of DeltaFabric usage.
 pub fn accuracy<B: Backend>(model: &Model<B>, dataset: &MnistDataset, device: &B::Device) -> f64 {
     let num_batches = dataset.len() / BATCH_SIZE;
     let mut correct = 0usize;

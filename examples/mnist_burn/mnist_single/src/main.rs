@@ -14,6 +14,8 @@ const EPOCHS: usize = 5;
 const LEARNING_RATE: f64 = 0.01;
 const TRAIN_SAMPLES: usize = 60000;
 
+/// Initialize tracing/logging for the example.
+/// [NOTE] This is example helper function, not part of DeltaFabric usage.
 pub fn init_tracing() {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -25,6 +27,8 @@ pub fn init_tracing() {
         .init();
 }
 
+/// Load a batch of MNIST images and labels from the dataset.
+/// [NOTE] This is example helper function, not part of DeltaFabric usage.
 pub fn load_batch<B: Backend>(
     dataset: &MnistDataset,
     start: usize,
@@ -65,6 +69,8 @@ pub fn load_batch<B: Backend>(
     Some(MnistBatch { images, targets })
 }
 
+/// Training loop demonstrating Burn framework usage: forward pass, backward pass, and optimizer step.
+/// The framework usage to focus on is: forward_classification, loss.backward(), optimizer.step().
 pub fn train<B: AutodiffBackend>(
     model: &mut Model<B>,
     dataset: &MnistDataset,
@@ -100,6 +106,8 @@ pub fn train<B: AutodiffBackend>(
     epoch_times
 }
 
+/// Calculate model accuracy on a dataset.
+/// [NOTE] This is example helper function, not part of DeltaFabric usage.
 pub fn accuracy<B: Backend>(model: &Model<B>, dataset: &MnistDataset, device: &B::Device) -> f64 {
     let num_batches = dataset.len() / BATCH_SIZE;
     let mut correct = 0usize;
