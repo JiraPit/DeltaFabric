@@ -4,6 +4,16 @@ This document tracks changes, deviations, and improvements across versions.
 
 ---
 
+## v0.7
+
+### Bug Fixes
+
+- **Burn**: Fixed compilation error due to non-existent `map_data` method on `Tensor`
+  - Replaced with `Tensor::from_data` to create tensors from `TensorData`
+  - Preserved gradient tracking in `apply_params` using `is_require_grad()` and `require_grad()`
+
+---
+
 ## v0.6
 
 ### Optimization
@@ -63,6 +73,7 @@ Simplified the DeltaFabric API to reduce user boilerplate:
 - **Helper functions**: `extract_params()` and `apply_params()` for working with model parameters
 
 - **Simplified usage**:
+
   ```rust
   use delta_fabric::{Config, Fabric};
 
@@ -167,16 +178,19 @@ This document tracks differences between the implementation and the original spe
 **Status:** Not implemented (planned for v2)
 
 **SPEC.md specifies:**
+
 ```rust
 rkyv::access::<ArchivedFabricPacket, rkyv::rancor::Error>(&payload[..])
 ```
 
 **Current implementation:**
+
 ```rust
 rkyv::from_bytes::<FabricPacket, _>(&payload)
 ```
 
 **Reason:** Using `from_bytes` for simplicity. Zero-copy requires:
+
 - `rkyv::access` to get zero-copy reference
 - `process_deltas` accepting `&ArchivedFabricPacket` instead of `&FabricPacket`
 - Careful lifetime management
@@ -190,6 +204,7 @@ rkyv::from_bytes::<FabricPacket, _>(&payload)
 **Status:** Functional equivalent with different implementation
 
 **SPEC.md specifies:**
+
 ```rust
 delta_subscribers: HashMap<u64, zenoh::Subscriber<'static, ()>>
 // ...
@@ -197,6 +212,7 @@ while let Ok(sample) = sub.try_recv()
 ```
 
 **Current implementation:**
+
 ```rust
 delta_samples: Arc<Mutex<Vec<zenoh::sample::Sample>>>
 // Callbacks push to buffer
@@ -212,11 +228,13 @@ delta_samples: Arc<Mutex<Vec<zenoh::sample::Sample>>>
 **Status:** API difference, functionally correct
 
 **PLAN.md specifies:**
+
 ```rust
 archived.deserialize(&mut rkyv::rancor::UndisclosedError)
 ```
 
 **Current implementation:**
+
 ```rust
 deserialize::<FabricPacket, rkyv::rancor::Error>(archived)
 ```
@@ -242,12 +260,12 @@ All tests use imported functions with dummy data, no logic reimplementation.
 
 ### Dependencies Used
 
-| Package | Version |
-|---------|---------|
-| rkyv | 0.8.15 |
-| zenoh | 1.9.0 |
-| burn | 0.20.1 |
+| Package      | Version      |
+| ------------ | ------------ |
+| rkyv         | 0.8.15       |
+| zenoh        | 1.9.0        |
+| burn         | 0.20.1       |
 | burn-ndarray | 0.20.1 (dev) |
-| tokio | 1.52.0 |
-| anyhow | 1.0.102 |
-| tracing | 0.1.44 |
+| tokio        | 1.52.0       |
+| anyhow       | 1.0.102      |
+| tracing      | 0.1.44       |

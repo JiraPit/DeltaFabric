@@ -4,9 +4,9 @@ mod burn_tests {
     use crate::core::config::Config;
     use burn::nn::Linear;
     use burn::nn::LinearConfig;
-    use burn::tensor::backend::Backend;
-    use burn::tensor::Tensor;
     use burn::optim::{GradientsParams, Optimizer, SgdConfig};
+    use burn::tensor::Tensor;
+    use burn::tensor::backend::Backend;
     use burn_ndarray::NdArray;
 
     type TestBackend = NdArray<f32>;
@@ -203,9 +203,14 @@ mod burn_tests {
 
         // Check that parameters actually changed (gradients were applied)
         let params_after = extract_params(&model);
-        let params_changed = params_before.iter().zip(params_after.iter())
+        let params_changed = params_before
+            .iter()
+            .zip(params_after.iter())
             .any(|(a, b)| (a - b).abs() > 1e-6);
-        assert!(params_changed, "Parameters should change after optimizer step before apply_params");
+        assert!(
+            params_changed,
+            "Parameters should change after optimizer step before apply_params"
+        );
 
         // Apply identity transform (same weights)
         let params = extract_params(&model);
@@ -223,9 +228,14 @@ mod burn_tests {
 
         // Check that parameters still change after apply_params (gradients still flow)
         let final_params = extract_params(&final_model);
-        let final_params_changed = params.iter().zip(final_params.iter())
+        let final_params_changed = params
+            .iter()
+            .zip(final_params.iter())
             .any(|(a, b)| (a - b).abs() > 1e-6);
-        assert!(final_params_changed, "Parameters should still change after optimizer step following apply_params");
+        assert!(
+            final_params_changed,
+            "Parameters should still change after optimizer step following apply_params"
+        );
     }
 
     #[test]
@@ -237,13 +247,22 @@ mod burn_tests {
         let learning_rate = 0.01;
 
         // Create input and target tensors using from_data
-        let input_data = burn::tensor::TensorData::new(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0], [4, 3]);
-        let target_data = burn::tensor::TensorData::new(vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], [4, 2]);
+        let input_data = burn::tensor::TensorData::new(
+            vec![
+                1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            ],
+            [4, 3],
+        );
+        let target_data =
+            burn::tensor::TensorData::new(vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], [4, 2]);
         let input = Tensor::<TestAutodiffBackend, 2>::from_data(input_data, &device);
         let targets = Tensor::<TestAutodiffBackend, 2>::from_data(target_data, &device);
 
         let mut losses = Vec::new();
-        let two = Tensor::<TestAutodiffBackend, 2>::from_data(burn::tensor::TensorData::new(vec![2.0f32], [1, 1]), &device);
+        let two = Tensor::<TestAutodiffBackend, 2>::from_data(
+            burn::tensor::TensorData::new(vec![2.0f32], [1, 1]),
+            &device,
+        );
 
         for _step in 0..10 {
             let output = model.forward(input.clone());

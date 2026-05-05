@@ -32,6 +32,7 @@ pub(crate) fn extract_params<M: Module<B>, B: Backend>(model: &M) -> Vec<f32> {
     collector.data
 }
 
+/// Collects parameter values from a model during visitation.
 struct ParamCollector {
     data: Vec<f32>,
 }
@@ -63,6 +64,7 @@ pub(crate) fn apply_params<M: Module<B>, B: Backend>(model: M, params: &[f32]) -
     model.map(&mut setter)
 }
 
+/// Applies parameter updates from a flat vector to a model.
 struct ParamSetter {
     data: Vec<f32>,
     pos: usize,
@@ -76,11 +78,18 @@ impl<B: Backend> ModuleMapper<B> for ParamSetter {
         let tensor_data = self.data[self.pos..end_pos].to_vec();
         self.pos = end_pos;
 
-        let old_tensor = param.val();
-        let new_data_tensor =
-            Tensor::<B, D>::from_data(TensorData::new(tensor_data, shape), &old_tensor.device());
+        let device = param.val().device();
+        let data = TensorData::new(tensor_data, shape);
+        let requires_grad = param.val().is_require_grad();
 
-        param.map(|_| new_data_tensor)
+        param.map(|_| {
+            let tensor = Tensor::from_data(data, &device);
+            if requires_grad {
+                tensor.require_grad()
+            } else {
+                tensor
+            }
+        })
     }
 }
 
