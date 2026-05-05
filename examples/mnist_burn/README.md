@@ -82,29 +82,31 @@ fabric.shutdown().await?;
 | `sync_interval`         | 100     | Broadcast delta every N steps   |
 | `relay_threshold`       | 1e-6    | Minimum delta to relay          |
 
+**Note:** The example scripts override `alpha` to 0.25 (see `mnist_distributed_2/src/main.rs:211` and `mnist_distributed_3/src/main.rs:211`).
+
 ## Data Split
 
-Training uses 10% of MNIST (6,000 samples) for faster CPU training.
+Training uses the full MNIST dataset (60,000 samples).
 
 ### Single Node
 
 | Total Samples |
 |---------------|
-| 6,000 |
+| 60,000 |
 
 ### 2 Nodes
 
-Each node trains on 3,000 samples:
+Each node trains on 30,000 samples:
 | Node | Samples |
 |------|---------|
-| 1 | 0 - 2,999 |
-| 2 | 3,000 - 5,999 |
+| 1 | 0 - 29,999 |
+| 2 | 30,000 - 59,999 |
 
 ### 3 Nodes
 
-Each node trains on 2,000 samples:
+Each node trains on 20,000 samples:
 | Node | Samples |
 |------|---------|
-| 1 | 0 - 1,999 |
-| 2 | 2,000 - 3,999 |
-| 3 | 4,000 - 5,999 |
+| 1 | 0 - 19,999 |
+| 2 | 20,000 - 39,999 |
+| 3 | 40,000 - 59,999 |
