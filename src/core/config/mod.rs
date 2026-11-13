@@ -20,6 +20,10 @@ pub struct Config {
     /// Number of steps between local delta broadcasts. Higher values
     /// reduce network traffic but may slow synchronization.
     pub sync_interval: u64,
+    /// Name of the training job (letters, digits, '-', '_' and '.').
+    /// Nodes only discover and exchange deltas with nodes of the same
+    /// cluster, so separate jobs on one network must use different names.
+    pub cluster: String,
     /// List of peer node IDs to communicate with. Links are undirected, so
     /// list each link in both nodes' peers. A one-sided link only works if
     /// both nodes discover each other; otherwise initialization fails.
@@ -46,11 +50,13 @@ impl Config {
     /// - delta_selection_ratio: 0.01
     /// - value_encoding: F32
     /// - sync_interval: 100
+    /// - cluster: "default"
     pub fn new(peers: Vec<u64>) -> Self {
         Self {
             gamma: 0.02,
             delta_selection_ratio: 0.01,
             value_encoding: ValueEncoding::F32,
+            cluster: "default".to_string(),
             sync_interval: 100,
             peers,
         }
@@ -77,6 +83,12 @@ impl Config {
     /// Sets the sync interval. Returns self for method chaining.
     pub fn sync_interval(mut self, sync_interval: u64) -> Self {
         self.sync_interval = sync_interval;
+        self
+    }
+
+    /// Sets the cluster name. Returns self for method chaining.
+    pub fn cluster(mut self, cluster: impl Into<String>) -> Self {
+        self.cluster = cluster.into();
         self
     }
 
@@ -111,6 +123,15 @@ impl Config {
             self.delta_selection_ratio
         );
         ensure!(self.sync_interval > 0, "sync_interval must be at least 1");
+        ensure!(
+            !self.cluster.is_empty()
+                && self
+                    .cluster
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')),
+            "cluster must be non-empty and use only letters, digits, '-', '_' and '.', got {:?}",
+            self.cluster
+        );
         Ok(())
     }
 }

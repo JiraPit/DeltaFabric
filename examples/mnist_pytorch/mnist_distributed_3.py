@@ -117,6 +117,7 @@ def main():
         sync_interval=args.sync_interval,
         delta_selection_ratio=args.delta_selection_ratio,
         value_encoding=args.value_encoding,
+        cluster=os.environ.get("DF_CLUSTER", "default"),
     )
 
     fabric = Fabric(node_id=node_id, config=config)

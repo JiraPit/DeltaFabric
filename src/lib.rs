@@ -31,6 +31,7 @@ use pyo3::prelude::*;
 fn delta_fabric(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pytorch::Fabric>()?;
     m.add_class::<pytorch::Config>()?;
+    m.add_function(wrap_pyfunction!(pytorch::init_logging, m)?)?;
     Ok(())
 }
 

@@ -31,6 +31,11 @@ The previous rule (apply `alpha` × peer deltas to both buffers, relay with `alp
 - Subscribers are declared before a node announces READY, so early deltas are not lost
 - `init_fabric` fails if a neighbor finished discovery without this node (one-sided peer lists)
 
+### Usability
+
+- **Cluster names**: `Config::cluster` (default `"default"`) namespaces all topics as `deltafabric/{cluster}/node/{id}/...`, so separate jobs on one network no longer interfere. Examples read `DF_CLUSTER`
+- **Python logging**: warnings go to stderr by default (`RUST_LOG` respected); `delta_fabric.init_logging(level)` enables more detail
+
 ### Measurement
 
 - `Session::stats()` (Burn) and `fabric.stats()` (PyTorch) report delta and snapshot traffic

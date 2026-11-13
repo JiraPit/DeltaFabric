@@ -36,10 +36,12 @@ pub struct NodeState {
 /// Represents a node in the distributed cluster.
 #[derive(Clone, Debug)]
 pub struct Node {
-    /// Unique identifier for this node
+    /// Unique identifier for this node within its cluster
     pub id: u64,
     /// List of peer node IDs
     pub peers: Vec<u64>,
+    /// Name of the training job; nodes only see nodes with the same cluster
+    pub cluster: String,
 }
 
 /// Snapshot of the traffic counters of a Session.
@@ -86,9 +88,16 @@ struct PendingSnapshot {
     sent_at: Instant,
 }
 
-/// Extracts the node ID from a key expression of the form "node/{id}/...".
+/// Builds the key expression "deltafabric/{cluster}/node/{node}/{kind}".
+///
+/// `node` may be "*" to match every node of the cluster.
+fn cluster_key(cluster: &str, node: impl std::fmt::Display, kind: &str) -> String {
+    format!("deltafabric/{cluster}/node/{node}/{kind}")
+}
+
+/// Extracts the node ID from a key expression ending in ".../{id}/{kind}".
 fn node_id_from_key(key: &str) -> Option<u64> {
-    key.split('/').nth(1)?.parse().ok()
+    key.rsplit('/').nth(1)?.parse().ok()
 }
 
 /// Checks that every neighbor also counts this node as its neighbor.
@@ -187,7 +196,7 @@ impl Session {
     /// Waits for all peers to become READY before completing.
     /// Sets up delta publishers, subscribers and the snapshot queryable after discovery.
     pub async fn init_fabric(&mut self) -> Result<()> {
-        let my_topic = format!("node/{}/state", self.node.id);
+        let my_topic = self.key(self.node.id, "state");
         let publisher = self
             .zenoh
             .declare_publisher(&my_topic)
@@ -196,11 +205,11 @@ impl Session {
 
         let state_sub = self
             .zenoh
-            .declare_subscriber("node/*/state")
+            .declare_subscriber(cluster_key(&self.node.cluster, "*", "state"))
             .await
             .map_err(|e| anyhow::anyhow!("Failed to declare state subscriber: {}", e))?;
 
-        info!(node_id = %self.node.id, peers = ?self.node.peers, "Starting cluster initialization");
+        info!(node_id = %self.node.id, cluster = %self.node.cluster, peers = ?self.node.peers, "Starting cluster initialization");
 
         let mut known_states: HashMap<u64, NodeState> = HashMap::new();
         let mut global_nodes: HashSet<u64> = HashSet::new();
@@ -318,7 +327,7 @@ impl Session {
         // Block instead of dropping under congestion: a dropped delta forces a full resync.
         self.delta_publisher = Some(
             self.zenoh
-                .declare_publisher(format!("node/{}/delta", self.node.id))
+                .declare_publisher(self.key(self.node.id, "delta"))
                 .congestion_control(CongestionControl::Block)
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to declare delta publisher: {}", e))?,
@@ -327,7 +336,7 @@ impl Session {
         let queries = self.snapshot_queries.clone();
         self.snapshot_queryable = Some(
             self.zenoh
-                .declare_queryable(format!("node/{}/anchor", self.node.id))
+                .declare_queryable(self.key(self.node.id, "anchor"))
                 .callback(move |query| {
                     if let Ok(mut guard) = queries.lock() {
                         guard.push(query);
@@ -342,7 +351,7 @@ impl Session {
             let samples = samples_ref.clone();
             let sub = self
                 .zenoh
-                .declare_subscriber(format!("node/{}/delta", peer_id))
+                .declare_subscriber(self.key(peer_id, "delta"))
                 .callback(move |sample| {
                     if let Ok(mut guard) = samples.lock() {
                         guard.push(sample);
@@ -360,6 +369,11 @@ impl Session {
         }
 
         Ok(())
+    }
+
+    /// Key expression of one of this cluster's topics for `node`.
+    fn key(&self, node: u64, kind: &str) -> String {
+        cluster_key(&self.node.cluster, node, kind)
     }
 
     /// Sorted IDs of this node's neighbors in the undirected cluster graph.
@@ -478,7 +492,7 @@ impl Session {
 
         let replies = self
             .zenoh
-            .get(format!("node/{}/anchor", peer))
+            .get(self.key(peer, "anchor"))
             .timeout(SNAPSHOT_TIMEOUT)
             .await
             .map_err(|e| anyhow::anyhow!("Snapshot request to {} failed: {}", peer, e))?;
@@ -556,7 +570,7 @@ impl Session {
 
         match self
             .zenoh
-            .put(format!("node/{}/state", self.node.id), state_json)
+            .put(self.key(self.node.id, "state"), state_json)
             .await
         {
             Ok(_) => {

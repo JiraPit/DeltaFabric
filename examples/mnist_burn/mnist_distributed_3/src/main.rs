@@ -225,7 +225,8 @@ async fn main() -> Result<()> {
     let config = Config::new(peers)
         .gamma(0.02)
         .delta_selection_ratio(0.01)
-        .sync_interval(100);
+        .sync_interval(100)
+        .cluster(std::env::var("DF_CLUSTER").unwrap_or_else(|_| "default".to_string()));
     let mut fabric = Fabric::new(node_id, config)
         .await
         .expect("Failed to initialize DeltaFabric");

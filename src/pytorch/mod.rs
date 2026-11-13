@@ -13,11 +13,49 @@ use crate::core::{
 use anyhow::Context;
 use anyhow::Result;
 use pyo3::{
-    Bound, Py, PyAny, PyResult, Python, exceptions, pyclass, pymethods,
+    Bound, Py, PyAny, PyResult, Python, exceptions, pyclass, pyfunction, pymethods,
     types::{PyAnyMethods, PyDict, PyDictMethods},
 };
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
+
+/// Log filter used when Python code has not chosen one: DeltaFabric warnings
+/// (resyncs, rejected packets, unstable gamma) and only Zenoh errors.
+const DEFAULT_LOG_FILTER: &str = "warn,zenoh=error";
+
+/// Installs a stderr logger for DeltaFabric with the given filter.
+///
+/// # Errors
+///
+/// Returns an error if the filter is invalid or logging is already initialized.
+fn install_logging(filter: &str) -> Result<()> {
+    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+    let filter = EnvFilter::try_new(filter).context("Invalid log filter")?;
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .with(filter)
+        .try_init()
+        .map_err(|_| anyhow::anyhow!("Logging is already initialized"))
+}
+
+/// Enables DeltaFabric logging on stderr.
+///
+/// Must be called before the first Fabric is created; otherwise the Fabric
+/// installs the default (warnings only, or the RUST_LOG variable if set).
+///
+/// # Arguments
+///
+/// * `level` - Level or filter, e.g. "info", "debug" or "warn,delta_fabric=info"
+///
+/// # Errors
+///
+/// Raises RuntimeError if logging is already initialized or the filter is invalid.
+#[pyfunction]
+#[pyo3(signature = (level = "info"))]
+pub fn init_logging(level: &str) -> PyResult<()> {
+    install_logging(level).map_err(|e| exceptions::PyRuntimeError::new_err(format!("{:#}", e)))
+}
 
 /// Configuration for DeltaFabric's weight synchronization protocol.
 ///
@@ -27,6 +65,7 @@ use tracing::{info, warn};
 /// * `delta_selection_ratio` - Fraction of changed weights to broadcast (default: 0.01)
 /// * `sync_interval` - Broadcast delta every N steps (default: 100)
 /// * `value_encoding` - "f32", "int8" or "sign" (default: "f32")
+/// * `cluster` - Name of the training job (default: "default")
 /// * `peers` - List of peer node IDs to synchronize with
 #[pyclass]
 #[derive(Clone)]
@@ -43,6 +82,9 @@ pub struct Config {
     /// How delta values are sent: "f32", "int8" or "sign".
     #[pyo3(get, set)]
     pub value_encoding: String,
+    /// Name of the training job; nodes only see nodes with the same cluster.
+    #[pyo3(get, set)]
+    pub cluster: String,
     /// Peer node IDs for synchronization.
     #[pyo3(get, set)]
     pub peers: Vec<u64>,
@@ -59,18 +101,21 @@ impl Config {
     /// * `delta_selection_ratio` - Fraction of changed weights to broadcast (default: 0.01)
     /// * `sync_interval` - Broadcast delta every N steps (default: 100)
     /// * `value_encoding` - "f32" (4 bytes), "int8" (1 byte) or "sign" (1 bit) per value
+    /// * `cluster` - Name of the training job (default: "default"). Separate jobs
+    ///   on one network must use different names
     ///
     /// # Errors
     ///
     /// Raises ValueError for an unknown value_encoding.
     #[new]
-    #[pyo3(signature = (peers, gamma = 0.02, delta_selection_ratio = 0.01, sync_interval = 100, value_encoding = "f32"))]
+    #[pyo3(signature = (peers, gamma = 0.02, delta_selection_ratio = 0.01, sync_interval = 100, value_encoding = "f32", cluster = "default"))]
     pub fn new(
         peers: Vec<u64>,
         gamma: f32,
         delta_selection_ratio: f32,
         sync_interval: u64,
         value_encoding: &str,
+        cluster: &str,
     ) -> PyResult<Self> {
         ValueEncoding::parse(value_encoding)
             .map_err(|e| exceptions::PyValueError::new_err(format!("{:#}", e)))?;
@@ -79,6 +124,7 @@ impl Config {
             delta_selection_ratio,
             sync_interval,
             value_encoding: value_encoding.to_string(),
+            cluster: cluster.to_string(),
             peers,
         })
     }
@@ -103,6 +149,7 @@ impl Config {
             delta_selection_ratio: self.delta_selection_ratio,
             value_encoding: ValueEncoding::parse(&self.value_encoding)?,
             sync_interval: self.sync_interval,
+            cluster: self.cluster.clone(),
             peers: self.peers.clone(),
         })
     }
@@ -145,6 +192,10 @@ struct FabricInner {
 
 impl Fabric {
     fn init_sync(node_id: u64, config: CoreConfig) -> Result<Self> {
+        // Make warnings visible unless the user already chose a logger.
+        let filter = std::env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_LOG_FILTER.to_string());
+        let _ = install_logging(&filter);
+
         info!(node_id = %node_id, "Initializing DeltaFabric (PyTorch)");
 
         config.validate().context("Invalid DeltaFabric config")?;
@@ -159,6 +210,7 @@ impl Fabric {
         let node = Node {
             id: node_id,
             peers: config.peers.clone(),
+            cluster: config.cluster.clone(),
         };
 
         let runtime = tokio::runtime::Builder::new_multi_thread()

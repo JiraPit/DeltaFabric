@@ -22,7 +22,13 @@ mod networking_tests {
     }
 
     async fn ready_session(id: u64, peers: Vec<u64>) -> Session {
-        let mut session = Session::new(Node { id, peers }).await.unwrap();
+        let mut session = Session::new(Node {
+            id,
+            peers,
+            cluster: "test".to_string(),
+        })
+        .await
+        .unwrap();
         session.init_fabric().await.unwrap();
         session
     }
@@ -63,9 +69,55 @@ mod networking_tests {
         assert_eq!(state, parsed);
     }
 
+    async fn ready_in_cluster(cluster: &str, id: u64, peers: Vec<u64>) -> Session {
+        let mut session = Session::new(Node {
+            id,
+            peers,
+            cluster: cluster.to_string(),
+        })
+        .await
+        .unwrap();
+        session.init_fabric().await.unwrap();
+        session
+    }
+
+    #[test]
+    fn test_cluster_key() {
+        assert_eq!(
+            cluster_key("job-a", 7, "delta"),
+            "deltafabric/job-a/node/7/delta"
+        );
+        assert_eq!(
+            cluster_key("job-a", "*", "state"),
+            "deltafabric/job-a/node/*/state"
+        );
+        // A cluster literally named "node" must not confuse ID parsing.
+        assert_eq!(node_id_from_key(&cluster_key("node", 9, "delta")), Some(9));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_clusters_with_same_ids_are_isolated() {
+        // Two jobs both use node IDs 1201 and 1202 on the same host.
+        let (a1, a2, b1, b2) = tokio::join!(
+            ready_in_cluster("iso-a", 1201, vec![1202]),
+            ready_in_cluster("iso-a", 1202, vec![1201]),
+            ready_in_cluster("iso-b", 1201, vec![1202]),
+            ready_in_cluster("iso-b", 1202, vec![1201]),
+        );
+
+        a1.broadcast(test_packet(1)).await.unwrap();
+        assert_eq!(wait_for_packets(&a2, 1).await.len(), 1);
+
+        // Give a stray packet time to arrive in the other cluster, then check none did.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(b1.pull_packets().is_empty());
+        assert!(b2.pull_packets().is_empty());
+        assert_eq!(b2.stats().packets_received, 0);
+    }
+
     #[test]
     fn test_node_id_from_key() {
-        assert_eq!(node_id_from_key("node/42/delta"), Some(42));
+        assert_eq!(node_id_from_key("deltafabric/test/node/42/delta"), Some(42));
         assert_eq!(node_id_from_key("node/abc/delta"), None);
         assert_eq!(node_id_from_key("node"), None);
     }
@@ -75,6 +127,7 @@ mod networking_tests {
         let session = Session::new(Node {
             id: 1101,
             peers: vec![],
+            cluster: "test".to_string(),
         })
         .await
         .unwrap();
@@ -166,6 +219,7 @@ mod networking_tests {
                 let mut s = Session::new(Node {
                     id: 1106,
                     peers: vec![1107],
+                    cluster: "test".to_string(),
                 })
                 .await
                 .unwrap();

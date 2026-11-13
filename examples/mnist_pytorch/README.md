@@ -92,6 +92,7 @@ fabric.close()
 | `delta_selection_ratio` | 0.01    | Only sync 1% of changed weights  |
 | `sync_interval`         | 100     | Broadcast delta every N steps    |
 | `value_encoding`        | f32     | Value format: `f32` (4 B), `int8` (1 B) or `sign` (1 bit) |
+| `cluster`               | default | Job name; nodes only see nodes of the same cluster (examples read `DF_CLUSTER`) |
 
 ## Script Arguments
 
@@ -105,6 +106,18 @@ The example scripts support the following command-line arguments:
 | `--value-encoding` | f32     | Overrides the default `value_encoding` in `Config` |
 | `--partition`     | contiguous | `class` gives each node only its own digits (3 nodes: 0-3, 4-6, 7-9), so sync quality shows in accuracy |
 | `--use-data`      | 1.0     | Fraction of training data to use (0.0 to 1.0)     |
+
+## Running Several Jobs on One Network
+
+Nodes discover each other automatically, so two jobs using the same node IDs would mix. Give each job its own cluster name:
+
+```bash
+DF_CLUSTER=job-a DF_NODE_ID=1 DF_PEERS=2,3 python mnist_distributed_3.py
+```
+
+## Logging
+
+DeltaFabric prints warnings (resyncs, rejected packets, an unstable `gamma`) to stderr by default. For more detail, call `delta_fabric.init_logging("info")` before creating the `Fabric`, or set `RUST_LOG`.
 
 ## Measuring Sync Quality
 

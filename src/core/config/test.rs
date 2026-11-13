@@ -27,6 +27,7 @@ mod config_tests {
         assert_eq!(config.delta_selection_ratio, 0.01);
         assert_eq!(config.sync_interval, 100);
         assert_eq!(config.value_encoding, ValueEncoding::F32);
+        assert_eq!(config.cluster, "default");
         assert!(config.validate().is_ok());
     }
 
@@ -71,5 +72,18 @@ mod config_tests {
                 .max_stable_gamma(),
             1.0
         );
+    }
+
+    #[test]
+    fn test_validate_cluster_names() {
+        for good in ["default", "job-1", "exp_2.run3"] {
+            assert!(Config::default().cluster(good).validate().is_ok(), "{good}");
+        }
+        for bad in ["", "a/b", "job*", "x$y", "a b", "q?"] {
+            assert!(
+                Config::default().cluster(bad).validate().is_err(),
+                "{bad:?}"
+            );
+        }
     }
 }

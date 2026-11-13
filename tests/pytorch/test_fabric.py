@@ -8,6 +8,8 @@ all DeltaFabric nodes on a host discover each other.
 
 import multiprocessing as mp
 import os
+import subprocess
+import sys
 import tempfile
 import time
 
@@ -130,6 +132,53 @@ def test_isolated_node_reports_stats():
         "snapshots_received",
         "snapshot_bytes_received",
     }
+
+
+# Runs Python code in a fresh process (logging can only be set up once per process).
+def run_snippet(code):
+    env = {k: v for k, v in os.environ.items() if k != "RUST_LOG"}
+    return subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120, env=env
+    )
+
+
+def test_cluster_config():
+    assert Config(peers=[]).cluster == "default"
+    assert Config(peers=[], cluster="job-a").cluster == "job-a"
+    try:
+        Fabric(node_id=3105, config=Config(peers=[], cluster="a/b"))
+    except RuntimeError as e:
+        assert "cluster" in str(e)
+    else:
+        raise AssertionError("invalid cluster name should be rejected")
+
+
+def test_warnings_are_visible_by_default():
+    result = run_snippet(
+        "from delta_fabric import Fabric, Config\n"
+        "f = Fabric(node_id=3120, config=Config(peers=[], gamma=0.5))\n"
+        "f.close()\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "gamma is above the stable range" in result.stderr
+    assert "DeltaFabric initialized" not in result.stderr, "info is hidden by default"
+
+
+def test_init_logging_enables_info_once():
+    result = run_snippet(
+        "import delta_fabric\n"
+        "from delta_fabric import Fabric, Config\n"
+        "delta_fabric.init_logging('info')\n"
+        "f = Fabric(node_id=3121, config=Config(peers=[]))\n"
+        "f.close()\n"
+        "try:\n"
+        "    delta_fabric.init_logging('debug')\n"
+        "except RuntimeError:\n"
+        "    print('second call raised')\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "DeltaFabric initialized" in result.stderr
+    assert "second call raised" in result.stdout
 
 
 def test_two_nodes_converge():

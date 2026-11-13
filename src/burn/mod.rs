@@ -131,6 +131,7 @@ impl Fabric {
         let node = crate::core::networking::Node {
             id: node_id,
             peers: config.peers.clone(),
+            cluster: config.cluster.clone(),
         };
 
         let mut session = Session::new(node)

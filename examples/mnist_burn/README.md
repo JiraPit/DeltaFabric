@@ -84,6 +84,7 @@ fabric.shutdown().await?;
 | `delta_selection_ratio` | 0.01    | Only sync 1% of changed weights |
 | `sync_interval`         | 100     | Broadcast delta every N steps   |
 | `value_encoding`        | f32     | Value format: `f32` (4 B), `int8` (1 B) or `sign` (1 bit) |
+| `cluster`               | default | Job name; nodes only see nodes of the same cluster (examples read `DF_CLUSTER`) |
 
 **Note:** The example scripts set `gamma` explicitly to the default 0.02.
 
