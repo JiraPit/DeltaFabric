@@ -4,6 +4,41 @@ This document tracks changes, deviations, and improvements across versions.
 
 ---
 
+## Unreleased
+
+### Sync Algorithm (breaking)
+
+The previous rule (apply `alpha` × peer deltas to both buffers, relay with `alpha^hops`) had no force pulling models together: on 3-node MNIST the final weights differed by 11.2% versus 14.2% with no syncing at all. Sync now follows CHOCO-SGD while keeping the delta-only design:
+
+- **New `W_mix` buffer**: weighted sum of own and neighbor anchors, rebuilt from received deltas. Received deltas no longer touch `W_active`/`W_anchor`
+- **Mixing step**: `W_active += gamma * (W_mix - W_anchor)` at every sync, with Metropolis weights from the discovered graph (preserves the cluster average)
+- **Config**: `alpha` and `relay_threshold` replaced by `gamma` (default 0.02). Keep `gamma <= 2 * delta_selection_ratio` (`Config::max_stable_gamma`); larger values diverge. `Config::validate` rejects out-of-range values
+- **No relays**: each packet carries only the sender's delta; the origin comes from the topic. Links are undirected and neighbors subscribe to each other
+- **Core `SyncState`**: framework-independent protocol state shared by Burn and PyTorch
+- Delta generation skips non-finite values instead of panicking on NaN; the sequence number only advances when a delta is sent
+
+### Compression
+
+- **Indices**: sent as LEB128 gaps between sorted positions (about 1 byte each at 1% density, was 4)
+- **Values**: new `value_encoding` config: `F32` (default, 4 bytes), `Int8` (1 byte, scaled by the largest value) or `Sign` (1 bit, scaled by the mean absolute value). Zero-rounded entries are dropped
+- The sender updates its anchor with the decoded values, so rounding error stays in `W_active - W_anchor` and is sent later
+- Wire format: `DeltaPacket.delta` is now an `EncodedDelta` (still rkyv); `core::codec` encodes and decodes it. Malformed deltas are ignored and recovered through the resync path
+
+### Reliability
+
+- Deltas must arrive exactly once: a sequence gap or a mismatching initial-weights hash triggers a resync from neighbor anchor snapshots (Zenoh queryable `node/{id}/anchor`)
+- Delta publisher uses `CongestionControl::Block` instead of dropping
+- Subscribers are declared before a node announces READY, so early deltas are not lost
+- `init_fabric` fails if a neighbor finished discovery without this node (one-sided peer lists)
+
+### Measurement
+
+- `Session::stats()` (Burn) and `fabric.stats()` (PyTorch) report delta and snapshot traffic
+- PyTorch examples save final weights and traffic; `examples/compare_weights.py` compares nodes
+- PyTorch: integer state (BatchNorm `num_batches_tracked`) is no longer synced; errors include their cause
+
+---
+
 ## v0.7
 
 ### Bug Fixes

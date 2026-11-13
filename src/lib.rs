@@ -13,8 +13,8 @@ pub mod pytorch;
 
 use anyhow::Result;
 pub use core::{
-    ArchivedDeltaPacket, Config, DeltaPacket, Node, NodeState, Session, SparseDelta,
-    access_archived_packet, process_deltas,
+    ArchivedDeltaPacket, Config, DeltaPacket, Node, NodeState, Session, SparseDelta, SyncState,
+    TrafficStats, ValueEncoding, access_archived_packet,
 };
 
 #[cfg(feature = "burn")]

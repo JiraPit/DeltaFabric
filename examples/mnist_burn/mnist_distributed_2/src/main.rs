@@ -222,7 +222,7 @@ async fn main() -> Result<()> {
     tracing::info!("Initializing DeltaFabric...");
 
     let config = Config::new(peers)
-        .alpha(0.25) // blend factor
+        .gamma(0.02) // consensus step size (<= 2x delta_selection_ratio)
         .delta_selection_ratio(0.01) // 1% of weights
         .sync_interval(100); // sync every 100 steps
     let mut fabric = Fabric::new(node_id, config)
@@ -235,6 +235,8 @@ async fn main() -> Result<()> {
     tch::manual_seed(SEED as i64);
 
     let mut model: Model<Autodiff<LibTorch<f32>>> = Model::new(&device);
+    // Register the identical initial weights before any local training.
+    model = fabric.step(model).await.expect("Failed to register initial weights");
 
     tracing::info!("Loading MNIST data...");
     let test_dataset = MnistDataset::test();

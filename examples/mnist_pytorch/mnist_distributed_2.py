@@ -34,6 +34,17 @@ class IndexedDataset(Dataset):
         return self.base_dataset[self.indices[idx]]
 
 
+# Indices of the training samples whose digit belongs to this node's group.
+# Digits 0-9 are split into NUM_NODES contiguous groups (3 nodes: 0-3, 4-6, 7-9).
+# [NOTE] This is example helper function, not part of DeltaFabric usage.
+def class_partition(targets, node_id, num_samples):
+    sizes = [10 // NUM_NODES + (1 if i < 10 % NUM_NODES else 0) for i in range(NUM_NODES)]
+    first = sum(sizes[: node_id - 1])
+    classes = list(range(first, first + sizes[node_id - 1]))
+    mask = torch.isin(targets[:num_samples], torch.tensor(classes))
+    return mask.nonzero().flatten().tolist(), classes
+
+
 # Parse comma-separated peer node IDs from environment variable.
 # [NOTE] This is example helper function, not part of DeltaFabric usage.
 def parse_peers(peers_str):
@@ -47,7 +58,10 @@ def main():
         description="Distributed MNIST training with DeltaFabric"
     )
     parser.add_argument(
-        "--alpha", type=float, default=0.25, help="Alpha value for DeltaFabric config"
+        "--gamma",
+        type=float,
+        default=0.02,
+        help="Consensus step size for DeltaFabric config (0 disables syncing)",
     )
     parser.add_argument(
         "--sync-interval",
@@ -60,6 +74,18 @@ def main():
         type=float,
         default=0.01,
         help="Delta selection ratio for DeltaFabric config",
+    )
+    parser.add_argument(
+        "--value-encoding",
+        choices=["f32", "int8", "sign"],
+        default="f32",
+        help="How delta values are sent: f32 (4 bytes), int8 (1 byte) or sign (1 bit)",
+    )
+    parser.add_argument(
+        "--partition",
+        choices=["contiguous", "class"],
+        default="contiguous",
+        help="contiguous: equal slices of the shuffled data; class: each node only sees its own digits",
     )
     parser.add_argument(
         "--use-data",
@@ -87,9 +113,10 @@ def main():
     global fabric
     config = Config(
         peers=peers,
-        alpha=args.alpha,
+        gamma=args.gamma,
         sync_interval=args.sync_interval,
         delta_selection_ratio=args.delta_selection_ratio,
+        value_encoding=args.value_encoding,
     )
     fabric = Fabric(node_id=node_id, config=config)
 
@@ -97,6 +124,9 @@ def main():
 
     model = Model()
     print(f"Node {node_id}: Model initialized with {model.num_params()} parameters")
+
+    # Register the identical initial weights before any local training.
+    model = fabric.step(model)
 
     optimizer = optim.SGD(model.parameters(), lr=LEARNING_RATE)
     criterion = nn.CrossEntropyLoss()
@@ -114,7 +144,16 @@ def main():
     )
     print("Starting training with DeltaFabric sync...")
 
-    my_indices = list(range(partition_start, partition_end))
+    if args.partition == "class":
+        my_indices, my_classes = class_partition(
+            full_train_dataset.targets, node_id, actual_train_samples
+        )
+        print(
+            f"Node {node_id}: Class partition, digits {my_classes} ({len(my_indices)} samples)"
+        )
+    else:
+        my_indices = list(range(partition_start, partition_end))
+        my_classes = list(range(10))
     node_dataset = IndexedDataset(full_train_dataset, my_indices)
     train_loader = DataLoader(node_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
@@ -137,13 +176,19 @@ def main():
         model.eval()
         correct = 0
         total = 0
+        unseen_correct = 0
+        unseen_total = 0
         test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
         with torch.no_grad():
             for images, targets in test_loader:
                 output = model(images)
                 predictions = output.argmax(dim=1)
-                correct += (predictions == targets).sum().item()
+                hits = predictions == targets
+                correct += hits.sum().item()
                 total += targets.size(0)
+                unseen = ~torch.isin(targets, torch.tensor(my_classes))
+                unseen_correct += hits[unseen].sum().item()
+                unseen_total += unseen.sum().item()
         acc = correct / total
         epoch_accuracies.append(acc)
         elapsed = time.time() - start_time
@@ -152,6 +197,11 @@ def main():
         print(
             f"Node {node_id}, Epoch {epoch + 1}: Accuracy = {acc:.4f}, Time = {elapsed:.2f}s"
         )
+        if unseen_total:
+            print(
+                f"Node {node_id}, Epoch {epoch + 1}: Accuracy on digits it never trained on = "
+                f"{unseen_correct / unseen_total:.4f}"
+            )
 
     print(f"Node {node_id}: Training complete")
     print(f"Node {node_id}: Average time per epoch: {total_elapsed / EPOCHS:.2f}s")
@@ -159,8 +209,23 @@ def main():
     with open(f"epoch_times_dist2_node_{node_id}.txt", "w") as f:
         f.write(",".join(map(str, epoch_times)))
 
-    with open(f"accuracy_dist2_node_{node_id}_alpha_{config.alpha}.txt", "w") as f:
+    with open(f"accuracy_dist2_node_{node_id}_gamma_{config.gamma}.txt", "w") as f:
         f.write(",".join(map(str, epoch_accuracies)))
+
+    # Final weights, compared across nodes with ../compare_weights.py
+    torch.save(
+        model.state_dict(),
+        f"final_weights_dist2_node_{node_id}_gamma_{config.gamma}.pt",
+    )
+
+    stats = fabric.stats()
+    print(
+        f"Node {node_id}: Sent {stats['packets_sent']} packets, "
+        f"{stats['bytes_sent']} bytes "
+        f"({stats['bytes_sent'] / max(stats['packets_sent'], 1):.0f} bytes/packet)"
+    )
+    with open(f"traffic_dist2_node_{node_id}_gamma_{config.gamma}.txt", "w") as f:
+        f.write(",".join(str(stats[k]) for k in sorted(stats)))
 
     fabric.close()
     print(f"Node {node_id}: Shutdown complete")

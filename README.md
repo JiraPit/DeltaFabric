@@ -14,16 +14,33 @@ We include a built-in networking layer powered by the `Zenoh` P2P protocol. Node
 
 ### Anchor-Active Weight Model
 
-We maintain two weight buffers per node:
+We maintain three weight buffers per node:
 
 - **W_active**: weights currently being optimized by local gradients
-- **W_anchor**: weights representing the last acknowledged state
+- **W_anchor**: the copy of this node's weights that its neighbors know about
+- **W_mix**: the weighted sum of this node's anchor and its neighbors' anchors
 
-The delta between these buffers captures the local updates discovered since the last synchronization round. This two-buffer design eliminates the need to store copies of every peer's model, reducing memory overhead compared to traditional decentralized approaches.
+The delta between W_active and W_anchor captures the local updates not yet sent. Since all nodes start from identical weights, every neighbor's anchor can be rebuilt from the deltas it sends, so W_mix is maintained from received deltas alone. No node ever stores or sends a copy of a peer's model, regardless of how many neighbors it has.
+
+### Consensus Mixing
+
+At every sync interval, each node moves its weights a step `gamma` toward the average of its neighbors:
+
+`W_active += gamma * (W_mix - W_anchor)`
+
+This pull is proportional to how far apart the nodes are, which keeps the models together while each trains on its own data. Neighbor weights are Metropolis weights, so mixing preserves the cluster average. This is the CHOCO-SGD algorithm (Koloskova, Stich & Jaggi, ICML 2019).
 
 ### Compressed Delta
 
-Sending an entire set of weights becomes impractically large as the model grows. To reduce bandwidth and increase speed, we only send the most significant changes (deltas) per step. This allows a single packet to hold not only one delta but also others relayed from additional peers.
+Sending an entire set of weights becomes impractically large as the model grows. To reduce bandwidth and increase speed, we only send the most significant changes (the top-k of `W_active - W_anchor`) per sync. What is not sent stays in the difference and goes out later, so no local progress is lost. Each packet carries only the sender's own delta.
+
+Each entry is packed tightly: indices are sent as LEB128-encoded gaps between sorted positions (about 1 byte each at 1% density instead of 4), and values can be sent as `f32` (4 bytes), `int8` (1 byte, scaled by the largest value) or `sign` (1 bit, scaled by the mean absolute value). Lossy encodings are safe because the anchor records the decoded values that were actually sent: the rounding error stays in `W_active - W_anchor` and is sent later.
+
+Heavier compression needs a smaller `gamma`: keep `gamma <= 2 * delta_selection_ratio`, or the nodes can diverge.
+
+### Reliable Delivery
+
+All nodes must start from identical weights (use the same seed) and call `fabric.step(model)` once before training, so each node records those weights as its starting anchor. W_mix is only correct if every delta arrives exactly once. Deltas carry consecutive sequence numbers; a gap (or a node that started from different weights) triggers a resync, where the node requests its neighbors' full anchors once and rebuilds W_mix.
 
 ## Example Setup
 
@@ -33,7 +50,7 @@ The ring topology below represents a minimal DeltaFabric cluster where each node
   <img src="https://raw.githubusercontent.com/JiraPit/DeltaFabric/main/visualization/example_topology.png" width="75%" alt="Ring Topology">
 </div>
 
-This sequence diagram illustrates the weight delta synchronization process for the ring topology. All nodes start with identical weight buffers and train locally in parallel. When a node hits its sync interval, it computes a compressed delta and sends it to its single peer. Each peer applies the attenuated delta to its own weights and relays it forward until it circulates back to the originator or the delta gets too small (< relay_threshold).
+This sequence diagram illustrates the weight delta synchronization process for the ring topology. Links are undirected, so each node exchanges deltas with the two nodes next to it. All nodes start with identical weight buffers and train locally in parallel. When a node hits its sync interval, it mixes toward its neighbors, then computes a compressed delta and sends it to its neighbors, which add it to their W_mix.
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/JiraPit/DeltaFabric/main/visualization/example_flow.svg" width="75%" alt="Synchronization Flow">

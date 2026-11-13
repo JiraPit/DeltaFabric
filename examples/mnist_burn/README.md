@@ -59,6 +59,9 @@ let config = Config::new(peers);
 let mut fabric = Fabric::new(node_id, config).await?;
 
 let mut model: Model<Autodiff<NdArray<f32>>> = Model::new(&device);
+// Register the identical initial weights (same seed on every node) before
+// training; otherwise the first sync triggers a one-time full-model resync.
+model = fabric.step(model).await?;
 
 for batch in dataset {
     let output = model.forward_classification(batch);
@@ -77,12 +80,12 @@ fabric.shutdown().await?;
 
 | Parameter               | Default | Description                     |
 | ----------------------- | ------- | ------------------------------- |
-| `alpha`                 | 0.1     | Blend factor for remote deltas  |
+| `gamma`                 | 0.02    | Consensus step size (keep <= 2 x `delta_selection_ratio`) |
 | `delta_selection_ratio` | 0.01    | Only sync 1% of changed weights |
 | `sync_interval`         | 100     | Broadcast delta every N steps   |
-| `relay_threshold`       | 1e-6    | Minimum delta to relay          |
+| `value_encoding`        | f32     | Value format: `f32` (4 B), `int8` (1 B) or `sign` (1 bit) |
 
-**Note:** The example scripts override `alpha` to 0.25 (see `mnist_distributed_2/src/main.rs:211` and `mnist_distributed_3/src/main.rs:211`).
+**Note:** The example scripts set `gamma` explicitly to the default 0.02.
 
 ## Data Split
 
