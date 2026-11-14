@@ -10,7 +10,7 @@ use burn::{
     tensor::backend::AutodiffBackend,
 };
 use burn_tch::{LibTorch, LibTorchDevice};
-use delta_fabric::{Config, Fabric};
+use delta_fabric::{init_logging, Config, Fabric};
 use mnist_shared::{MnistBatch, Model};
 
 const BATCH_SIZE: usize = 32;
@@ -38,20 +38,6 @@ fn shuffle_indices(seed: u64, count: usize) -> Vec<usize> {
         indices.swap(i, j);
     }
     indices
-}
-
-/// Initialize tracing/logging for the example.
-/// [NOTE] This is example helper function, not part of DeltaFabric usage.
-pub fn init_tracing() {
-    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,delta_fabric=debug"));
-
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(filter)
-        .init();
 }
 
 /// Parse comma-separated peer node IDs from environment variable.
@@ -193,7 +179,9 @@ pub fn accuracy<B: Backend>(model: &Model<B>, dataset: &MnistDataset, device: &B
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_tracing();
+    // RUST_LOG overrides the default log level.
+    let log_filter = env::var("RUST_LOG").unwrap_or_else(|_| "info,delta_fabric=debug".to_string());
+    init_logging(&log_filter)?;
 
     let node_id: u64 = env::var("DF_NODE_ID")
         .expect("DF_NODE_ID must be set")
@@ -223,9 +211,10 @@ async fn main() -> Result<()> {
     tracing::info!("Initializing DeltaFabric...");
 
     let config = Config::new(peers)
-        .alpha(0.25)
+        .gamma(0.02)
         .delta_selection_ratio(0.01)
-        .sync_interval(100);
+        .sync_interval(100)
+        .cluster(std::env::var("DF_CLUSTER").unwrap_or_else(|_| "default".to_string()));
     let mut fabric = Fabric::new(node_id, config)
         .await
         .expect("Failed to initialize DeltaFabric");
@@ -236,6 +225,11 @@ async fn main() -> Result<()> {
     tch::manual_seed(SEED as i64);
 
     let mut model: Model<Autodiff<LibTorch<f32>>> = Model::new(&device);
+    // Register the identical initial weights before any local training.
+    model = fabric
+        .step(model)
+        .await
+        .expect("Failed to register initial weights");
 
     tracing::info!("Loading MNIST data...");
     let test_dataset = MnistDataset::test();
@@ -284,7 +278,16 @@ async fn main() -> Result<()> {
     let content = times_str.join(",");
     std::fs::write(format!("epoch_times_dist3_node_{}.txt", node_id), content).unwrap();
 
-    fabric.shutdown().await?;
+    let stats = fabric.stats();
+    tracing::info!(
+        node_id = %node_id,
+        packets_sent = %stats.packets_sent,
+        bytes_sent = %stats.bytes_sent,
+        snapshots_received = %stats.snapshots_received,
+        "Traffic"
+    );
+
+    fabric.close().await?;
 
     tracing::info!(node_id = %node_id, "Shutdown complete");
 

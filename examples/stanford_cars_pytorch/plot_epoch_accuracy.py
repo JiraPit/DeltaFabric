@@ -10,21 +10,21 @@ def parse_filename(filename):
     if basename.startswith("accuracy_single"):
         return ("single", None, None)
 
-    # Parse: accuracy_dist2_node_1_alpha_0.25.txt
+    # Parse: accuracy_dist2_node_1_gamma_0.02.txt
     name = basename.replace("accuracy_", "").replace(".txt", "")
 
     if "dist2_node_" in name:
         rest = name.split("dist2_node_")[1]
-        parts = rest.split("_alpha_")
+        parts = rest.split("_gamma_")
         node = parts[0]
-        alpha = parts[1] if len(parts) > 1 else None
-        return ("dist2", node, alpha)
+        gamma = parts[1] if len(parts) > 1 else None
+        return ("dist2", node, gamma)
     elif "dist3_node_" in name:
         rest = name.split("dist3_node_")[1]
-        parts = rest.split("_alpha_")
+        parts = rest.split("_gamma_")
         node = parts[0]
-        alpha = parts[1] if len(parts) > 1 else None
-        return ("dist3", node, alpha)
+        gamma = parts[1] if len(parts) > 1 else None
+        return ("dist3", node, gamma)
 
     return None
 
@@ -44,7 +44,7 @@ def main():
     for filepath in txt_files:
         result = parse_filename(filepath)
         if result:
-            run_type, node_id, alpha = result
+            run_type, node_id, gamma = result
             accuracies = read_accuracies(filepath)
 
             for epoch_idx, acc in enumerate(accuracies):
@@ -52,7 +52,7 @@ def main():
                     {
                         "run_type": run_type,
                         "node_id": node_id,
-                        "alpha": alpha,
+                        "gamma": gamma,
                         "epoch": epoch_idx + 1,
                         "accuracy": acc,
                     }
@@ -72,9 +72,9 @@ def main():
     # Plot for dist2
     dist2_data = dist_df[dist_df["run_type"] == "dist2"]
     if not dist2_data.empty:
-        for alpha_val, group in dist2_data.groupby("alpha"):
+        for gamma_val, group in dist2_data.groupby("gamma"):
             avg_data = group.groupby("epoch")["accuracy"].mean().reset_index()
-            label = f"alpha={alpha_val}" if alpha_val else "default"
+            label = f"gamma={gamma_val}" if gamma_val else "default"
             ax1.plot(
                 avg_data["epoch"],
                 avg_data["accuracy"],
@@ -95,9 +95,9 @@ def main():
     # Plot for dist3
     dist3_data = dist_df[dist_df["run_type"] == "dist3"]
     if not dist3_data.empty:
-        for alpha_val, group in dist3_data.groupby("alpha"):
+        for gamma_val, group in dist3_data.groupby("gamma"):
             avg_data = group.groupby("epoch")["accuracy"].mean().reset_index()
-            label = f"alpha={alpha_val}" if alpha_val else "default"
+            label = f"gamma={gamma_val}" if gamma_val else "default"
             ax2.plot(
                 avg_data["epoch"],
                 avg_data["accuracy"],

@@ -1,4 +1,10 @@
-pub mod core;
+// Without a framework feature nothing uses the core yet.
+#[cfg_attr(
+    not(any(feature = "burn", feature = "pytorch")),
+    allow(dead_code, unused_imports)
+)]
+mod core;
+mod logging;
 
 #[cfg(all(feature = "burn", feature = "pytorch"))]
 compile_error!(
@@ -6,16 +12,13 @@ compile_error!(
 );
 
 #[cfg(feature = "burn")]
-pub mod burn;
+mod burn;
 
 #[cfg(feature = "pytorch")]
-pub mod pytorch;
+mod pytorch;
 
-use anyhow::Result;
-pub use core::{
-    ArchivedDeltaPacket, Config, DeltaPacket, Node, NodeState, Session, SparseDelta,
-    access_archived_packet, process_deltas,
-};
+pub use core::{Config, TrafficStats, ValueEncoding};
+pub use logging::init_logging;
 
 #[cfg(feature = "burn")]
 pub use burn::Fabric;
@@ -31,42 +34,6 @@ use pyo3::prelude::*;
 fn delta_fabric(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pytorch::Fabric>()?;
     m.add_class::<pytorch::Config>()?;
-    Ok(())
-}
-
-/// Initializes tracing with default filter "info,delta_fabric=debug".
-///
-/// Call once at application start to enable structured logging.
-pub fn init_tracing() {
-    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
-
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,delta_fabric=debug"));
-
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(filter)
-        .init();
-}
-
-/// Initializes tracing with a custom filter string.
-///
-/// # Arguments
-///
-/// * `filter` - Tracing filter in env_logger format (e.g., "info,debug")
-///
-/// # Errors
-///
-/// Returns an error if the filter string is invalid.
-pub fn init_tracing_with_filter(filter: &str) -> Result<()> {
-    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
-
-    let filter = EnvFilter::from(filter);
-
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(filter)
-        .init();
-
+    m.add_function(wrap_pyfunction!(pytorch::py_init_logging, m)?)?;
     Ok(())
 }

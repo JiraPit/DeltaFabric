@@ -47,7 +47,10 @@ def main():
         description="Distributed Stanford Cars training with DeltaFabric"
     )
     parser.add_argument(
-        "--alpha", type=float, default=0.25, help="Alpha value for DeltaFabric config"
+        "--gamma",
+        type=float,
+        default=0.02,
+        help="Consensus step size for DeltaFabric config (0 disables syncing)",
     )
     parser.add_argument(
         "--sync-interval",
@@ -60,6 +63,12 @@ def main():
         type=float,
         default=0.01,
         help="Delta selection ratio for DeltaFabric config",
+    )
+    parser.add_argument(
+        "--value-encoding",
+        choices=["f32", "int8", "sign"],
+        default="f32",
+        help="How delta values are sent: f32 (4 bytes), int8 (1 byte) or sign (1 bit)",
     )
     parser.add_argument(
         "--use-data",
@@ -87,9 +96,11 @@ def main():
     global fabric
     config = Config(
         peers=peers,
-        alpha=args.alpha,
+        gamma=args.gamma,
         sync_interval=args.sync_interval,
         delta_selection_ratio=args.delta_selection_ratio,
+        value_encoding=args.value_encoding,
+        cluster=os.environ.get("DF_CLUSTER", "default"),
     )
     fabric = Fabric(node_id=node_id, config=config)
 
@@ -97,6 +108,9 @@ def main():
 
     model = Model()
     print(f"Node {node_id}: Model initialized with {model.num_params()} parameters")
+
+    # Register the identical initial weights before any local training.
+    model = fabric.step(model)
 
     optimizer = optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=0.9)
     criterion = nn.CrossEntropyLoss()
@@ -170,8 +184,23 @@ def main():
     with open(f"epoch_times_dist2_node_{node_id}.txt", "w") as f:
         f.write(",".join(map(str, epoch_times)))
 
-    with open(f"accuracy_dist2_node_{node_id}_alpha_{config.alpha}.txt", "w") as f:
+    with open(f"accuracy_dist2_node_{node_id}_gamma_{config.gamma}.txt", "w") as f:
         f.write(",".join(map(str, epoch_accuracies)))
+
+    # Final weights, compared across nodes with ../compare_weights.py
+    torch.save(
+        model.state_dict(),
+        f"final_weights_dist2_node_{node_id}_gamma_{config.gamma}.pt",
+    )
+
+    stats = fabric.stats()
+    print(
+        f"Node {node_id}: Sent {stats['packets_sent']} packets, "
+        f"{stats['bytes_sent']} bytes "
+        f"({stats['bytes_sent'] / max(stats['packets_sent'], 1):.0f} bytes/packet)"
+    )
+    with open(f"traffic_dist2_node_{node_id}_gamma_{config.gamma}.txt", "w") as f:
+        f.write(",".join(str(stats[k]) for k in sorted(stats)))
 
     fabric.close()
     print(f"Node {node_id}: Shutdown complete")

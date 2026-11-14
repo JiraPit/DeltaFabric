@@ -2,17 +2,15 @@
 mod test;
 
 use crate::core::{
-    access_archived_packet,
     config::Config,
-    networking::Session,
-    packet::{DeltaPacket, SparseDelta},
-    sync::{apply_deltas, generate_local_delta, process_deltas},
+    exchange,
+    networking::{Session, TrafficStats},
+    sync::SyncState,
 };
 use anyhow::{Context, Result};
 use burn::module::{Module, ModuleMapper, ModuleVisitor, Param};
 use burn::tensor::backend::Backend;
 use burn::tensor::{Tensor, TensorData};
-use std::collections::HashMap;
 use tracing::{info, warn};
 
 /// Extracts all learnable parameters and buffers from a Burn model into a flat vector.
@@ -96,22 +94,19 @@ impl<B: Backend> ModuleMapper<B> for ParamSetter {
 /// Manages distributed model synchronization across nodes using delta compression.
 ///
 /// Fabric coordinates parameter updates between multiple nodes by:
-/// - Aggregating incoming deltas from peers
-/// - Applying synced parameters to local models
-/// - Broadcasting local deltas at configurable intervals
+/// - Adding received peer deltas to the mixing sum every step
+/// - At each sync interval, moving the model toward its neighbors and
+///   broadcasting its own top-k anchor change
+/// - Resyncing from peer snapshots when a delta is lost
 pub struct Fabric {
     /// Zenoh session for network communication
-    pub session: Session,
+    session: Session,
     /// Configuration parameters for delta sync
-    pub config: Config,
-    /// Reference weights for delta computation (updated on each sync)
-    pub anchor_weights: Vec<f32>,
-    /// Tracks last seen sequence ID per origin node for deduplication
-    pub seen_table: HashMap<u64, u64>,
-    /// Local sequence counter for delta ordering
-    pub local_sequence: u64,
-    /// Total number of sync steps performed
-    pub step_count: u64,
+    config: Config,
+    /// Sync protocol state (anchor, mixing sum, sequence tracking)
+    state: SyncState,
+    /// Total number of steps performed
+    step_count: u64,
 }
 
 impl Fabric {
@@ -124,13 +119,24 @@ impl Fabric {
     ///
     /// # Errors
     ///
-    /// Returns an error if Zenoh session creation or cluster initialization fails.
+    /// Returns an error if the config is invalid, or if Zenoh session
+    /// creation or cluster initialization fails.
     pub async fn new(node_id: u64, config: Config) -> Result<Self> {
         info!(node_id = %node_id, "Initializing DeltaFabric");
+
+        config.validate().context("Invalid DeltaFabric config")?;
+        if config.gamma > config.max_stable_gamma() {
+            warn!(
+                gamma = %config.gamma,
+                max_stable_gamma = %config.max_stable_gamma(),
+                "gamma is above the stable range for this delta_selection_ratio; nodes may diverge"
+            );
+        }
 
         let node = crate::core::networking::Node {
             id: node_id,
             peers: config.peers.clone(),
+            cluster: config.cluster.clone(),
         };
 
         let mut session = Session::new(node)
@@ -142,25 +148,30 @@ impl Fabric {
             .await
             .context("Failed to initialize fabric")?;
 
+        let state = SyncState::new(
+            config.gamma,
+            config.delta_selection_ratio,
+            session.mixing_weights(),
+        )
+        .with_encoding(config.value_encoding);
+
         info!(node_id = %node_id, "DeltaFabric initialized successfully");
 
         Ok(Self {
             session,
             config,
-            anchor_weights: Vec::new(),
-            seen_table: HashMap::new(),
-            local_sequence: 0,
+            state,
             step_count: 0,
         })
     }
 
-    /// Performs one synchronization step, updating model with peer deltas.
+    /// Performs one synchronization step.
     ///
     /// This method:
-    /// 1. Extracts parameters from the model
-    /// 2. Pulls and processes incoming delta packets from peers
-    /// 3. Applies aggregated deltas to model weights
-    /// 4. Generates and broadcasts local delta if sync interval reached
+    /// 1. Initializes the anchor from the model on the first step
+    /// 2. Applies received peer deltas and handles resyncs (no model access)
+    /// 3. On sync steps, mixes the model toward its neighbors, broadcasts
+    ///    its own delta and writes the weights back
     ///
     /// # Arguments
     ///
@@ -173,101 +184,50 @@ impl Fabric {
     ///
     /// # Returns
     ///
-    /// Updated model with synced parameters applied.
+    /// The model, with synced parameters applied on sync steps.
     pub async fn step<B: Backend, M: Module<B>>(&mut self, model: M) -> Result<M> {
         self.step_count += 1;
-        let step_count = self.step_count;
-        let my_id = self.session.node.id;
-        let sync_interval = self.config.sync_interval;
+        let is_sync_step = self.step_count.is_multiple_of(self.config.sync_interval);
 
-        let mut aggregator: HashMap<u32, f32> = HashMap::new();
-        let mut relay_updates: HashMap<u64, SparseDelta> = HashMap::new();
-
-        for sample in self.session.pull_packets() {
-            let payload = sample.payload().to_bytes();
-            match access_archived_packet(&payload) {
-                Ok(incoming) => {
-                    if let Some(updates) = process_deltas(
-                        &mut aggregator,
-                        incoming,
-                        &mut self.seen_table,
-                        self.config.alpha,
-                        self.config.relay_threshold,
-                        my_id,
-                    ) {
-                        relay_updates.extend(updates);
-                    }
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to deserialize incoming packet");
-                }
-            }
+        let mut active_flat = None;
+        if !self.state.is_initialized() {
+            let flat = extract_params(&model);
+            self.state.initialize(&flat);
+            active_flat = Some(flat);
         }
 
-        let is_sync_step = step_count.is_multiple_of(sync_interval);
-        let has_peer_updates = !aggregator.is_empty();
-        let need_active = self.anchor_weights.is_empty() || has_peer_updates || is_sync_step;
+        exchange(&mut self.session, &mut self.state).await?;
 
-        if !need_active {
+        if !is_sync_step {
             return Ok(model);
         }
 
-        let mut active_flat = extract_params(&model);
-
-        if self.anchor_weights.is_empty() {
-            self.anchor_weights = active_flat.clone();
+        let mut active_flat = active_flat.unwrap_or_else(|| extract_params(&model));
+        if let Some(packet) = self.state.sync_step(&mut active_flat)? {
             info!(
-                step = %step_count,
-                num_weights = %active_flat.len(),
-                "Initialized anchor weights"
+                step = %self.step_count,
+                seq = %packet.delta.sequence_id,
+                num_indices = %packet.delta.count,
+                "Broadcasting local delta"
             );
-        }
-
-        if has_peer_updates {
-            info!(node_id = %my_id, count = %aggregator.len(), "Applying peer deltas");
-            apply_deltas(&mut active_flat, &mut self.anchor_weights, &aggregator);
-        }
-
-        if is_sync_step {
-            self.local_sequence += 1;
-            if let Some(delta) = generate_local_delta(
-                &active_flat,
-                &mut self.anchor_weights,
-                self.config.delta_selection_ratio,
-                my_id,
-                self.local_sequence,
-            ) {
-                info!(
-                    step = %step_count,
-                    seq = %self.local_sequence,
-                    num_indices = %delta.indices.len(),
-                    "Generated local delta"
-                );
-                relay_updates.insert(my_id, delta);
-            }
-        }
-
-        if !relay_updates.is_empty() {
-            let packet = DeltaPacket {
-                updates: relay_updates,
-            };
             self.session
                 .broadcast(packet)
                 .await
                 .context("Failed to broadcast packet")?;
         }
 
-        if has_peer_updates {
-            Ok(apply_params(model, &active_flat))
-        } else {
-            Ok(model)
-        }
+        Ok(apply_params(model, &active_flat))
+    }
+
+    /// Returns delta and resync snapshot traffic counters.
+    pub fn stats(&self) -> TrafficStats {
+        self.session.stats()
     }
 
     /// Shuts down the Fabric, closing all network connections.
     ///
     /// Broadcasts an OFFLINE status to peers before closing.
-    pub async fn shutdown(&mut self) -> Result<()> {
+    pub async fn close(&mut self) -> Result<()> {
         info!(node_id = %self.session.node.id, "Shutting down DeltaFabric");
 
         self.session

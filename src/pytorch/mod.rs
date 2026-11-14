@@ -4,46 +4,71 @@
 //! using PyTorch models. Built with PyO3 for seamless Python integration.
 
 use crate::core::{
-    access_archived_packet,
+    codec::ValueEncoding,
     config::Config as CoreConfig,
+    exchange,
     networking::{Node, Session},
-    packet::{DeltaPacket, SparseDelta},
-    sync::{apply_deltas, generate_local_delta, process_deltas},
+    sync::SyncState,
 };
 use anyhow::Context;
 use anyhow::Result;
 use pyo3::{
-    Bound, Py, PyAny, PyResult, Python, exceptions, pyclass, pymethods,
+    Bound, Py, PyAny, PyResult, Python, exceptions, pyclass, pyfunction, pymethods,
     types::{PyAnyMethods, PyDict, PyDictMethods},
 };
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
+
+/// Log filter used when Python code has not chosen one: DeltaFabric warnings
+/// (resyncs, rejected packets, unstable gamma) and only Zenoh errors.
+const DEFAULT_LOG_FILTER: &str = "warn,zenoh=error";
+
+/// Enables DeltaFabric logging on stderr.
+///
+/// Must be called before the first Fabric is created; otherwise the Fabric
+/// installs the default (warnings only, or the RUST_LOG variable if set).
+///
+/// # Arguments
+///
+/// * `level` - Level or filter, e.g. "info", "debug" or "warn,delta_fabric=info"
+///
+/// # Errors
+///
+/// Raises RuntimeError if logging is already initialized or the filter is invalid.
+#[pyfunction]
+#[pyo3(name = "init_logging", signature = (level = "info"))]
+pub fn py_init_logging(level: &str) -> PyResult<()> {
+    crate::init_logging(level).map_err(|e| exceptions::PyRuntimeError::new_err(format!("{:#}", e)))
+}
 
 /// Configuration for DeltaFabric's weight synchronization protocol.
 ///
 /// # Fields
 ///
-/// * `alpha` - Blend factor for remote deltas (default: 0.5)
+/// * `gamma` - Consensus step size toward the neighbors (default: 0.02)
 /// * `delta_selection_ratio` - Fraction of changed weights to broadcast (default: 0.01)
 /// * `sync_interval` - Broadcast delta every N steps (default: 100)
-/// * `relay_threshold` - Minimum delta magnitude to relay (default: 1e-6)
+/// * `value_encoding` - "f32", "int8" or "sign" (default: "f32")
+/// * `cluster` - Name of the training job (default: "default")
 /// * `peers` - List of peer node IDs to synchronize with
 #[pyclass]
 #[derive(Clone)]
 pub struct Config {
-    /// Blend factor for remote deltas.
+    /// Consensus step size toward the neighbors.
     #[pyo3(get, set)]
-    pub alpha: f32,
+    pub gamma: f32,
     /// Fraction of changed weights to include in delta.
     #[pyo3(get, set)]
     pub delta_selection_ratio: f32,
     /// Steps between delta broadcasts.
     #[pyo3(get, set)]
     pub sync_interval: u64,
-    /// Minimum delta magnitude to relay.
+    /// How delta values are sent: "f32", "int8" or "sign".
     #[pyo3(get, set)]
-    pub relay_threshold: f32,
+    pub value_encoding: String,
+    /// Name of the training job; nodes only see nodes with the same cluster.
+    #[pyo3(get, set)]
+    pub cluster: String,
     /// Peer node IDs for synchronization.
     #[pyo3(get, set)]
     pub peers: Vec<u64>,
@@ -56,47 +81,71 @@ impl Config {
     /// # Arguments
     ///
     /// * `peers` - List of peer node IDs to synchronize with
-    /// * `alpha` - Blend factor for remote deltas (default: 0.1)
+    /// * `gamma` - Consensus step size toward the neighbors (default: 0.02)
     /// * `delta_selection_ratio` - Fraction of changed weights to broadcast (default: 0.01)
     /// * `sync_interval` - Broadcast delta every N steps (default: 100)
-    /// * `relay_threshold` - Minimum delta magnitude to relay (default: 1e-6)
+    /// * `value_encoding` - "f32" (4 bytes), "int8" (1 byte) or "sign" (1 bit) per value
+    /// * `cluster` - Name of the training job (default: "default"). Separate jobs
+    ///   on one network must use different names
+    ///
+    /// # Errors
+    ///
+    /// Raises ValueError for an unknown value_encoding.
     #[new]
-    #[pyo3(signature = (peers, alpha = 0.1, delta_selection_ratio = 0.01, sync_interval = 100, relay_threshold = 1e-6))]
+    #[pyo3(signature = (peers, gamma = 0.02, delta_selection_ratio = 0.01, sync_interval = 100, value_encoding = "f32", cluster = "default"))]
     pub fn new(
         peers: Vec<u64>,
-        alpha: f32,
+        gamma: f32,
         delta_selection_ratio: f32,
         sync_interval: u64,
-        relay_threshold: f32,
-    ) -> Self {
-        Self {
-            alpha,
+        value_encoding: &str,
+        cluster: &str,
+    ) -> PyResult<Self> {
+        ValueEncoding::parse(value_encoding)
+            .map_err(|e| exceptions::PyValueError::new_err(format!("{:#}", e)))?;
+        Ok(Self {
+            gamma,
             delta_selection_ratio,
             sync_interval,
-            relay_threshold,
+            value_encoding: value_encoding.to_string(),
+            cluster: cluster.to_string(),
             peers,
-        }
+        })
+    }
+
+    /// Largest gamma that reliably converges for this delta_selection_ratio.
+    pub fn max_stable_gamma(&self) -> f32 {
+        CoreConfig::default()
+            .delta_selection_ratio(self.delta_selection_ratio)
+            .max_stable_gamma()
     }
 }
 
-impl From<Config> for CoreConfig {
-    fn from(config: Config) -> Self {
-        CoreConfig {
-            alpha: config.alpha,
-            delta_selection_ratio: config.delta_selection_ratio,
-            sync_interval: config.sync_interval,
-            relay_threshold: config.relay_threshold,
-            peers: config.peers,
-        }
+impl Config {
+    /// Converts to the core Config.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if value_encoding was set to an unknown name.
+    fn to_core(&self) -> Result<CoreConfig> {
+        Ok(CoreConfig {
+            gamma: self.gamma,
+            delta_selection_ratio: self.delta_selection_ratio,
+            value_encoding: ValueEncoding::parse(&self.value_encoding)?,
+            sync_interval: self.sync_interval,
+            cluster: self.cluster.clone(),
+            peers: self.peers.clone(),
+        })
     }
 }
 
 /// Manages distributed model synchronization across nodes using delta compression.
 ///
 /// Fabric coordinates parameter updates between multiple nodes by:
-/// - Aggregating incoming deltas from peers
-/// - Applying synced parameters to local models
-/// - Broadcasting local deltas at configurable intervals
+/// - Adding received peer deltas to the mixing sum every step
+/// - At each sync interval, moving the model toward its neighbors and
+///   broadcasting its own top-k anchor change
+/// - Resyncing from peer snapshots when a delta is lost
 ///
 /// # Example
 ///
@@ -121,19 +170,31 @@ pub struct Fabric {
 struct FabricInner {
     session: Session,
     config: CoreConfig,
-    anchor_weights: Vec<f32>,
-    seen_table: HashMap<u64, u64>,
-    local_sequence: u64,
+    state: SyncState,
     step_count: u64,
 }
 
 impl Fabric {
     fn init_sync(node_id: u64, config: CoreConfig) -> Result<Self> {
+        // Make warnings visible unless the user already chose a logger.
+        let filter = std::env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_LOG_FILTER.to_string());
+        let _ = crate::init_logging(&filter);
+
         info!(node_id = %node_id, "Initializing DeltaFabric (PyTorch)");
+
+        config.validate().context("Invalid DeltaFabric config")?;
+        if config.gamma > config.max_stable_gamma() {
+            warn!(
+                gamma = %config.gamma,
+                max_stable_gamma = %config.max_stable_gamma(),
+                "gamma is above the stable range for this delta_selection_ratio; nodes may diverge"
+            );
+        }
 
         let node = Node {
             id: node_id,
             peers: config.peers.clone(),
+            cluster: config.cluster.clone(),
         };
 
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -145,14 +206,19 @@ impl Fabric {
         let mut session = runtime.block_on(async { Session::new(node).await })?;
         runtime.block_on(async { session.init_fabric().await })?;
 
+        let state = SyncState::new(
+            config.gamma,
+            config.delta_selection_ratio,
+            session.mixing_weights(),
+        )
+        .with_encoding(config.value_encoding);
+
         info!(node_id = %node_id, "DeltaFabric initialized successfully");
 
         let inner = FabricInner {
             session,
             config,
-            anchor_weights: Vec::new(),
-            seen_table: HashMap::new(),
-            local_sequence: 0,
+            state,
             step_count: 0,
         };
 
@@ -171,113 +237,54 @@ impl Fabric {
 
             let FabricInner {
                 ref mut session,
-                ref mut config,
-                ref mut anchor_weights,
-                ref mut seen_table,
-                ref mut local_sequence,
+                ref config,
+                ref mut state,
                 ref mut step_count,
             } = *inner;
 
             *step_count += 1;
             let step_count_val = *step_count;
             let is_sync_step = step_count_val.is_multiple_of(config.sync_interval);
-            let anchor_weights_is_empty = anchor_weights.is_empty();
 
-            let mut aggregator: HashMap<u32, f32> = HashMap::new();
-            let mut relay_updates: HashMap<u64, SparseDelta> = HashMap::new();
+            let extract = || {
+                Python::with_gil(|py| extract_params(model_handle.bind(py)))
+                    .map_err(anyhow::Error::new)
+            };
 
-            for sample in session.pull_packets() {
-                let payload = sample.payload().to_bytes();
-                match access_archived_packet(&payload) {
-                    Ok(incoming) => {
-                        info!(node_id = %session.node.id, "Received delta packet");
-                        if let Some(updates) = process_deltas(
-                            &mut aggregator,
-                            incoming,
-                            seen_table,
-                            config.alpha,
-                            config.relay_threshold,
-                            session.node.id,
-                        ) {
-                            relay_updates.extend(updates);
-                        }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Failed to deserialize incoming packet");
-                    }
-                }
+            let mut extracted = None;
+            if !state.is_initialized() {
+                let (active_flat, shapes, keys) = extract()?;
+                state.initialize(&active_flat);
+                extracted = Some((active_flat, shapes, keys));
             }
 
-            let has_peer_updates = !aggregator.is_empty();
-            let need_active = anchor_weights_is_empty || has_peer_updates || is_sync_step;
+            exchange(session, state).await?;
 
-            if !need_active {
-                return Ok::<_, anyhow::Error>((false, None));
+            if !is_sync_step {
+                return Ok::<_, anyhow::Error>(None);
             }
 
-            let (mut active_flat, shapes, keys) = Python::with_gil(|py| {
-                let model = model_handle.bind(py);
-                extract_params(model)
-            }).map_err(anyhow::Error::new)?;
+            let (mut active_flat, shapes, keys) = match extracted {
+                Some(params) => params,
+                None => extract()?,
+            };
 
-            if anchor_weights_is_empty {
-                *anchor_weights = active_flat.clone();
+            if let Some(packet) = state.sync_step(&mut active_flat)? {
                 info!(
                     step = %step_count_val,
-                    num_weights = %active_flat.len(),
-                    "Initialized anchor weights"
+                    seq = %packet.delta.sequence_id,
+                    num_indices = %packet.delta.count,
+                    "Broadcasting local delta"
                 );
-            }
-
-            if has_peer_updates {
-                info!(node_id = %session.node.id, count = %aggregator.len(), "Applying peer deltas");
-                apply_deltas(&mut active_flat, anchor_weights, &aggregator);
-            }
-
-            if is_sync_step {
-                *local_sequence += 1;
-                if let Some(delta) = generate_local_delta(
-                    &active_flat,
-                    anchor_weights,
-                    config.delta_selection_ratio,
-                    session.node.id,
-                    *local_sequence,
-                ) {
-                    info!(
-                        step = %step_count_val,
-                        seq = %*local_sequence,
-                        num_indices = %delta.indices.len(),
-                        "Generated local delta"
-                    );
-                    relay_updates.insert(session.node.id, delta);
-                }
-            }
-
-            if !relay_updates.is_empty() {
-                let packet = DeltaPacket {
-                    updates: relay_updates,
-                };
                 if let Err(e) = session.broadcast(packet).await {
                     warn!(error = %e, "Failed to broadcast packet");
                 }
             }
 
-            let result_params = if has_peer_updates {
-                Some((active_flat, keys, shapes))
-            } else {
-                None
-            };
-
-            Ok::<_, anyhow::Error>((has_peer_updates, result_params))
+            Ok::<_, anyhow::Error>(Some((active_flat, keys, shapes)))
         });
 
-        match result {
-            Ok((has_peer_updates, params_opt)) => Ok((has_peer_updates, params_opt)),
-            Err(e) => Err(exceptions::PyRuntimeError::new_err(format!(
-                "Step failed: {}",
-                e
-            ))),
-        }
+        result.map_err(|e| exceptions::PyRuntimeError::new_err(format!("Step failed: {:#}", e)))
     }
 }
 
@@ -295,18 +302,19 @@ impl Fabric {
     /// Initialized Fabric ready for synchronization
     #[new]
     pub fn new(node_id: u64, config: Config) -> PyResult<Self> {
-        let core_config: CoreConfig = config.into();
-        Self::init_sync(node_id, core_config)
-            .map_err(|e| exceptions::PyRuntimeError::new_err(format!("{}", e)))
+        config
+            .to_core()
+            .and_then(|core_config| Self::init_sync(node_id, core_config))
+            .map_err(|e| exceptions::PyRuntimeError::new_err(format!("{:#}", e)))
     }
 
-    /// Performs one synchronization step, updating model with peer deltas.
+    /// Performs one synchronization step.
     ///
     /// This method:
-    /// 1. Extracts parameters from the model state_dict
-    /// 2. Pulls and processes incoming delta packets from peers
-    /// 3. Applies aggregated deltas to model weights
-    /// 4. Generates and broadcasts local delta if sync interval reached
+    /// 1. Initializes the anchor from the model's floating-point state on the first step
+    /// 2. Applies received peer deltas and handles resyncs (no model access)
+    /// 3. On sync steps, mixes the model toward its neighbors, broadcasts
+    ///    its own delta and loads the weights back into the model
     ///
     /// # Arguments
     ///
@@ -318,9 +326,7 @@ impl Fabric {
     pub fn step(&self, model: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         let model_handle = model.clone().unbind();
 
-        let (has_peer_updates, params_opt) = self.step_sync(model_handle)?;
-
-        if has_peer_updates && let Some((active_flat, keys, shapes)) = params_opt {
+        if let Some((active_flat, keys, shapes)) = self.step_sync(model_handle)? {
             let py_dict = Python::with_gil(|py| apply_params(py, &keys, &shapes, &active_flat))?;
 
             let load_method = model.getattr("load_state_dict").map_err(|e| {
@@ -330,12 +336,43 @@ impl Fabric {
                 ))
             })?;
 
-            load_method.call1((py_dict,)).map_err(|e| {
+            // Only floating-point entries are synced, so other entries stay as they are.
+            let kwargs = PyDict::new(model.py());
+            kwargs.set_item("strict", false)?;
+            load_method.call((py_dict,), Some(&kwargs)).map_err(|e| {
                 exceptions::PyRuntimeError::new_err(format!("Failed to load state_dict: {}", e))
             })?;
         }
 
         Ok(model.clone().unbind())
+    }
+
+    /// Returns delta traffic counters.
+    ///
+    /// # Returns
+    ///
+    /// Dict with delta counters (`packets_sent`, `bytes_sent`, `packets_received`,
+    /// `bytes_received`) and resync snapshot counters (`snapshots_sent`,
+    /// `snapshot_bytes_sent`, `snapshots_received`, `snapshot_bytes_received`).
+    /// Byte counts are serialized payload sizes (excluding Zenoh framing).
+    pub fn stats(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let stats = self
+            .inner
+            .lock()
+            .map_err(|e| exceptions::PyRuntimeError::new_err(format!("Lock poisoned: {}", e)))?
+            .session
+            .stats();
+
+        let dict = PyDict::new(py);
+        dict.set_item("packets_sent", stats.packets_sent)?;
+        dict.set_item("bytes_sent", stats.bytes_sent)?;
+        dict.set_item("packets_received", stats.packets_received)?;
+        dict.set_item("bytes_received", stats.bytes_received)?;
+        dict.set_item("snapshots_sent", stats.snapshots_sent)?;
+        dict.set_item("snapshot_bytes_sent", stats.snapshot_bytes_sent)?;
+        dict.set_item("snapshots_received", stats.snapshots_received)?;
+        dict.set_item("snapshot_bytes_received", stats.snapshot_bytes_received)?;
+        Ok(Py::from(dict))
     }
 
     /// Shuts down the Fabric, closing all network connections.
@@ -361,10 +398,13 @@ impl Fabric {
 /// Contains the flattened parameters, shapes, and keys from a model's state_dict.
 type ExtractResult = (Vec<f32>, Vec<Vec<i64>>, Vec<String>);
 
-/// Return type for step_sync containing update status and optional parameters.
-type StepSyncResult = (bool, Option<(Vec<f32>, Vec<String>, Vec<Vec<i64>>)>);
+/// Return type for step_sync: the synced parameters on sync steps, otherwise None.
+type StepSyncResult = Option<(Vec<f32>, Vec<String>, Vec<Vec<i64>>)>;
 
-/// Extracts parameters from a PyTorch model's state_dict.
+/// Extracts floating-point parameters and buffers from a PyTorch model's state_dict.
+///
+/// Integer entries (such as BatchNorm's num_batches_tracked) are skipped:
+/// they are counters, not weights, and must not be averaged.
 ///
 /// # Arguments
 ///
@@ -394,6 +434,16 @@ fn extract_params(model: &Bound<'_, PyAny>) -> PyResult<ExtractResult> {
     let mut keys = Vec::new();
 
     for (key, value) in dict.iter() {
+        let is_float: bool = value
+            .call_method0("is_floating_point")
+            .and_then(|v| v.extract())
+            .map_err(|e| {
+                exceptions::PyTypeError::new_err(format!("Failed to check tensor dtype: {}", e))
+            })?;
+        if !is_float {
+            continue;
+        }
+
         let key_str: String = key.extract().map_err(|e| {
             exceptions::PyTypeError::new_err(format!("Failed to extract key: {}", e))
         })?;

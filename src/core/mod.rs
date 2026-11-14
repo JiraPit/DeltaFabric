@@ -1,4 +1,6 @@
+pub mod codec;
 pub mod config;
+pub mod exchange;
 pub mod networking;
 pub mod packet;
 pub mod sync;
@@ -6,7 +8,7 @@ pub mod sync;
 #[cfg(test)]
 mod test;
 
+pub use codec::ValueEncoding;
 pub use config::Config;
-pub use networking::{Node, NodeState, Session};
-pub use packet::{ArchivedDeltaPacket, DeltaPacket, SparseDelta, access_archived_packet};
-pub use sync::{apply_deltas, generate_local_delta, process_deltas};
+pub use exchange::exchange;
+pub use networking::TrafficStats;

@@ -4,10 +4,15 @@ Distributed MNIST training demonstrating DeltaFabric's weight synchronization pr
 
 ## Prerequisites
 
-Build and install the DeltaFabric Python extension:
+Install DeltaFabric:
 
 ```bash
-cd ../../DeltaFabric
+pip install delta_fabric
+```
+
+Or build it from this repository (from the repository root):
+
+```bash
 maturin develop --features pytorch
 ```
 
@@ -59,12 +64,15 @@ DF_NODE_ID=3 DF_PEERS=1,2 python mnist_distributed_3.py
 ```python
 from delta_fabric import Fabric, Config
 
-# 1. Create a fabric. This waits for other modules to be ready.
+# 1. Create a fabric. This waits for the other nodes to be ready.
 config = Config(peers=[2, 3])
 fabric = Fabric(node_id=1, config=config)
 
-# 2. Create PyTorch model
+# 2. Create PyTorch model (same seed on every node) and register its
+#    initial weights before training. Otherwise the first sync sees weights
+#    that already differ and triggers a one-time full-model resync.
 model = MyModel()
+model = fabric.step(model)
 
 # 3. Training loop
 for batch in dataloader:
@@ -85,10 +93,11 @@ fabric.close()
 
 | Parameter               | Default | Description                     |
 | ----------------------- | ------- | ------------------------------- |
-| `alpha`                 | 0.1     | Blend factor for remote deltas    |
+| `gamma`                 | 0.02    | Consensus step size (keep <= 2 x `delta_selection_ratio`) |
 | `delta_selection_ratio` | 0.01    | Only sync 1% of changed weights  |
 | `sync_interval`         | 100     | Broadcast delta every N steps    |
-| `relay_threshold`       | 1e-6    | Minimum delta to relay           |
+| `value_encoding`        | f32     | Value format: `f32` (4 B), `int8` (1 B) or `sign` (1 bit) |
+| `cluster`               | default | Job name; nodes only see nodes of the same cluster (examples read `DF_CLUSTER`) |
 
 ## Script Arguments
 
@@ -96,10 +105,34 @@ The example scripts support the following command-line arguments:
 
 | Parameter    | Default | Description                                      |
 | ------------ | ------- | ------------------------------------------------ |
-| `--alpha`         | 0.25    | Overrides the default `alpha` in `Config`         |
+| `--gamma`         | 0.02    | Overrides the default `gamma` in `Config` (0 disables syncing) |
 | `--sync-interval` | 100     | Overrides the default `sync_interval` in `Config` |
 | `--delta-selection-ratio` | 0.01    | Overrides the default `delta_selection_ratio` in `Config` |
+| `--value-encoding` | f32     | Overrides the default `value_encoding` in `Config` |
+| `--partition`     | contiguous | `class` gives each node only its own digits (3 nodes: 0-3, 4-6, 7-9), so sync quality shows in accuracy |
 | `--use-data`      | 1.0     | Fraction of training data to use (0.0 to 1.0)     |
+
+## Running Several Jobs on One Network
+
+Nodes discover each other automatically, so two jobs using the same node IDs would mix. Give each job its own cluster name:
+
+```bash
+DF_CLUSTER=job-a DF_NODE_ID=1 DF_PEERS=2,3 python mnist_distributed_3.py
+```
+
+## Logging
+
+DeltaFabric prints warnings (resyncs, rejected packets, an unstable `gamma`) to stderr by default. For more detail, call `delta_fabric.init_logging("info")` before creating the `Fabric`, or set `RUST_LOG`.
+
+## Measuring Sync Quality
+
+Each distributed node also writes `final_weights_<run>_node_<id>_gamma_<gamma>.pt` and `traffic_<run>_node_<id>_gamma_<gamma>.txt`, and prints how many bytes it sent. To see how close the nodes ended up, compare their final weights:
+
+```bash
+python ../compare_weights.py "final_weights_dist3_node_*_gamma_0.02.pt"
+```
+
+Run once with `--gamma 0` (no syncing) as a baseline: a working sync should give clearly smaller distances at a similar accuracy.
 
 ## Data Split
 

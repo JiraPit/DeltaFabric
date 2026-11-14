@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod burn_tests {
     use crate::burn::{Fabric, apply_params, extract_params};
+    use crate::core::codec::ValueEncoding;
     use crate::core::config::Config;
     use burn::nn::Linear;
     use burn::nn::LinearConfig;
@@ -19,6 +20,9 @@ mod burn_tests {
     fn create_test_config() -> Config {
         Config::default()
     }
+
+    // Node IDs are unique per test and far from the IDs used by the examples,
+    // because all Zenoh sessions on a host discover each other.
 
     #[test]
     fn test_extract_apply_roundtrip() {
@@ -112,8 +116,7 @@ mod burn_tests {
         let config = create_test_config();
 
         tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let mut fabric = Fabric::new(1, config).await.unwrap();
-            fabric.anchor_weights = vec![0.0; 8];
+            let mut fabric = Fabric::new(2001, config).await.unwrap();
 
             let original_params = extract_params(&model);
 
@@ -121,7 +124,7 @@ mod burn_tests {
 
             let result_params = extract_params(&result);
             assert_eq!(result_params, original_params);
-            assert!(fabric.seen_table.is_empty());
+            assert_eq!(fabric.stats().packets_sent, 0);
         });
     }
 
@@ -132,13 +135,15 @@ mod burn_tests {
         let config = create_test_config();
 
         tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let mut fabric = Fabric::new(1, config).await.unwrap();
-            assert!(fabric.anchor_weights.is_empty());
+            let mut fabric = Fabric::new(2002, config).await.unwrap();
+            assert!(!fabric.state.is_initialized());
 
+            let params = extract_params(&model);
             let _result = fabric.step(model).await.unwrap();
 
-            assert!(!fabric.anchor_weights.is_empty());
-            assert_eq!(fabric.anchor_weights.len(), 8);
+            assert!(fabric.state.is_initialized());
+            assert_eq!(fabric.state.anchor(), params.as_slice());
+            assert_eq!(fabric.state.mix_sum(), params.as_slice());
         });
     }
 
@@ -149,7 +154,7 @@ mod burn_tests {
         let config = create_test_config();
 
         tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let mut fabric = Fabric::new(1, config).await.unwrap();
+            let mut fabric = Fabric::new(2003, config).await.unwrap();
             assert_eq!(fabric.step_count, 0);
 
             let _result = fabric.step(model).await.unwrap();
@@ -165,15 +170,22 @@ mod burn_tests {
         config.sync_interval = 2;
 
         tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let mut fabric = Fabric::new(1, config).await.unwrap();
-            assert_eq!(fabric.local_sequence, 0);
+            let mut fabric = Fabric::new(2004, config).await.unwrap();
+            assert_eq!(fabric.state.local_sequence(), 0);
 
-            let _result = fabric.step(model).await.unwrap();
-            assert_eq!(fabric.local_sequence, 0);
+            let model = fabric.step(model).await.unwrap();
+            assert_eq!(fabric.state.local_sequence(), 0);
 
-            let model2 = create_test_model::<TestBackend>(&device);
-            let _result = fabric.step(model2).await.unwrap();
-            assert_eq!(fabric.local_sequence, 1);
+            // Unchanged weights: nothing to send, sequence stays put.
+            let model = fabric.step(model).await.unwrap();
+            assert_eq!(fabric.state.local_sequence(), 0);
+
+            let changed: Vec<f32> = extract_params(&model).iter().map(|p| p + 1.0).collect();
+            let model = apply_params(model, &changed);
+            let model = fabric.step(model).await.unwrap();
+            let _ = fabric.step(model).await.unwrap();
+            assert_eq!(fabric.state.local_sequence(), 1);
+            assert_eq!(fabric.stats().packets_sent, 1);
         });
     }
 
@@ -287,5 +299,99 @@ mod burn_tests {
             losses[0],
             losses[losses.len() - 1]
         );
+    }
+
+    #[test]
+    fn test_new_rejects_invalid_config() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let result = Fabric::new(2005, create_test_config().gamma(2.0)).await;
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn test_isolated_sync_step_keeps_model() {
+        // With no neighbors the mixing step must not move the weights.
+        let device = <TestBackend as Backend>::Device::default();
+        let model = create_test_model::<TestBackend>(&device);
+        let config = create_test_config().sync_interval(1).gamma(1.0);
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let mut fabric = Fabric::new(2006, config).await.unwrap();
+            let model = fabric.step(model).await.unwrap();
+
+            let trained: Vec<f32> = extract_params(&model).iter().map(|p| p * 0.5).collect();
+            let model = apply_params(model, &trained);
+            let model = fabric.step(model).await.unwrap();
+
+            assert_eq!(extract_params(&model), trained);
+        });
+    }
+
+    #[test]
+    fn test_two_fabrics_pull_models_together() {
+        two_fabrics_pull_models_together(2007, 2008, ValueEncoding::F32);
+    }
+
+    #[test]
+    fn test_two_fabrics_pull_models_together_with_sign_values() {
+        two_fabrics_pull_models_together(2009, 2010, ValueEncoding::Sign);
+    }
+
+    fn two_fabrics_pull_models_together(id_a: u64, id_b: u64, encoding: ValueEncoding) {
+        let device = <TestBackend as Backend>::Device::default();
+        let start = create_test_model::<TestBackend>(&device);
+        let init = extract_params(&start);
+        let config = |peer| {
+            create_test_config()
+                .peers(vec![peer])
+                .sync_interval(1)
+                .delta_selection_ratio(1.0)
+                .gamma(0.5)
+                .value_encoding(encoding)
+        };
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let (a, b) = tokio::join!(
+                Fabric::new(id_a, config(id_b)),
+                Fabric::new(id_b, config(id_a))
+            );
+            let (mut a, mut b) = (a.unwrap(), b.unwrap());
+
+            // Same start, then different local "training".
+            let mut model_a = a.step(apply_params(start.clone(), &init)).await.unwrap();
+            let mut model_b = b.step(apply_params(start, &init)).await.unwrap();
+            let pushed_a: Vec<f32> = init.iter().map(|p| p + 1.0).collect();
+            let pushed_b: Vec<f32> = init.iter().map(|p| p - 1.0).collect();
+            model_a = apply_params(model_a, &pushed_a);
+            model_b = apply_params(model_b, &pushed_b);
+
+            let distance = |a: &Vec<f32>, b: &Vec<f32>| {
+                a.iter()
+                    .zip(b)
+                    .map(|(x, y)| (x - y).powi(2))
+                    .sum::<f32>()
+                    .sqrt()
+            };
+            let before = distance(&extract_params(&model_a), &extract_params(&model_b));
+
+            for _ in 0..80 {
+                model_a = a.step(model_a).await.unwrap();
+                model_b = b.step(model_b).await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+
+            let params_a = extract_params(&model_a);
+            let params_b = extract_params(&model_b);
+            assert!(distance(&params_a, &params_b) < 0.01 * before);
+            assert!(!a.state.is_resyncing() && !b.state.is_resyncing());
+
+            // Mixing preserves the average of the two models. Nodes step
+            // independently, so a round where one node mixes before the other's
+            // delta arrives shifts it slightly (exact only in lockstep).
+            for ((x, y), p) in params_a.iter().zip(&params_b).zip(&init) {
+                assert!(((x + y) / 2.0 - p).abs() < 0.25);
+            }
+        });
     }
 }
