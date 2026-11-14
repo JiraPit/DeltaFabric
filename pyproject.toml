@@ -1,0 +1,17 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "delta_fabric"
+description = "Decentralized weight synchronization for distributed ML training"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/JiraPit/DeltaFabric"
+
+[tool.maturin]
+features = ["pytorch"]
