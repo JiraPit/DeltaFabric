@@ -42,3 +42,4 @@ examples/**/data/
 *.pt
 *.pth
 *.tar.gz
+__pycache__/
