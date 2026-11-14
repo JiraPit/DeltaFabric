@@ -2,6 +2,8 @@
 
 A decentralized weight synchronization protocol for distributed ML training with built-in networking. Currently supporting PyTorch and Burn.
 
+DeltaFabric's synchronization is based on CHOCO-SGD by Koloskova, Stich and Jaggi ([ICML 2019](https://arxiv.org/abs/1902.00340)). See [Citation](#citation).
+
 ## Core Concepts
 
 ### No-Master Architecture
@@ -104,3 +106,19 @@ This sequence diagram illustrates the weight delta synchronization process for t
 <div align="center">
   <img src="https://raw.githubusercontent.com/JiraPit/DeltaFabric/main/visualization/example_flow.svg" width="75%" alt="Synchronization Flow">
 </div>
+
+## Citation
+
+DeltaFabric implements CHOCO-SGD. Many thanks to its authors:
+
+```bibtex
+@inproceedings{koloskova2019decentralized,
+  title     = {Decentralized Stochastic Optimization and Gossip Algorithms with Compressed Communication},
+  author    = {Koloskova, Anastasia and Stich, Sebastian U. and Jaggi, Martin},
+  booktitle = {Proceedings of the 36th International Conference on Machine Learning},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {97},
+  pages     = {3478--3487},
+  year      = {2019}
+}
+```
