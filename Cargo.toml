@@ -2,6 +2,13 @@
 name = "delta_fabric"
 version = "0.7.2"
 edition = "2024"
+description = "Decentralized weight synchronization for distributed ML training with built-in networking"
+license = "MIT"
+repository = "https://github.com/JiraPit/DeltaFabric"
+readme = "README.md"
+keywords = ["machine-learning", "distributed", "decentralized", "zenoh", "burn"]
+categories = ["science", "network-programming"]
+include = ["/src", "/README.md", "/LICENSE", "/CHANGELOG.md"]
 
 [features]
 default = []
@@ -21,6 +28,9 @@ tokio = { version = "1.52.0", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 zenoh = "1.9.0"
+
+[package.metadata.docs.rs]
+features = ["burn"]
 
 [lib]
 name = "delta_fabric"
