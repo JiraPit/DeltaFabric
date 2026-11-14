@@ -36,9 +36,15 @@ The previous rule (apply `alpha` × peer deltas to both buffers, relay with `alp
 - **Cluster names**: `Config::cluster` (default `"default"`) namespaces all topics as `deltafabric/{cluster}/node/{id}/...`, so separate jobs on one network no longer interfere. Examples read `DF_CLUSTER`
 - **Python logging**: warnings go to stderr by default (`RUST_LOG` respected); `delta_fabric.init_logging(level)` enables more detail
 
+### Rust API (breaking)
+
+- Burn `Fabric` matches the Python names: `fabric.stats()` and `fabric.close()` (was `shutdown()`); its fields are private
+- `init_tracing()` and `init_tracing_with_filter()` replaced by `init_logging(level)`, the same function Python exposes
+- Only `Config`, `ValueEncoding`, `TrafficStats`, `Fabric` and `init_logging` are exported; packets, sessions and sync state are internal
+
 ### Measurement
 
-- `Session::stats()` (Burn) and `fabric.stats()` (PyTorch) report delta and snapshot traffic
+- `fabric.stats()` reports delta and snapshot traffic
 - PyTorch examples save final weights and traffic; `examples/compare_weights.py` compares nodes
 - PyTorch: integer state (BatchNorm `num_batches_tracked`) is no longer synced; errors include their cause
 

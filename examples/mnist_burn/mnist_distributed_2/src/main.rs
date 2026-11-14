@@ -287,7 +287,7 @@ async fn main() -> Result<()> {
     let content = times_str.join(",");
     std::fs::write(format!("epoch_times_dist2_node_{}.txt", node_id), content).unwrap();
 
-    fabric.shutdown().await?;
+    fabric.close().await?;
 
     tracing::info!(node_id = %node_id, "Shutdown complete");
 

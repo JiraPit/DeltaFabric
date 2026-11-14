@@ -1,7 +1,12 @@
 #[cfg(test)]
 mod test;
 
-use crate::core::{config::Config, exchange, networking::Session, sync::SyncState};
+use crate::core::{
+    config::Config,
+    exchange,
+    networking::{Session, TrafficStats},
+    sync::SyncState,
+};
 use anyhow::{Context, Result};
 use burn::module::{Module, ModuleMapper, ModuleVisitor, Param};
 use burn::tensor::backend::Backend;
@@ -95,13 +100,13 @@ impl<B: Backend> ModuleMapper<B> for ParamSetter {
 /// - Resyncing from peer snapshots when a delta is lost
 pub struct Fabric {
     /// Zenoh session for network communication
-    pub session: Session,
+    session: Session,
     /// Configuration parameters for delta sync
-    pub config: Config,
+    config: Config,
     /// Sync protocol state (anchor, mixing sum, sequence tracking)
-    pub state: SyncState,
+    state: SyncState,
     /// Total number of steps performed
-    pub step_count: u64,
+    step_count: u64,
 }
 
 impl Fabric {
@@ -214,10 +219,15 @@ impl Fabric {
         Ok(apply_params(model, &active_flat))
     }
 
+    /// Returns delta and resync snapshot traffic counters.
+    pub fn stats(&self) -> TrafficStats {
+        self.session.stats()
+    }
+
     /// Shuts down the Fabric, closing all network connections.
     ///
     /// Broadcasts an OFFLINE status to peers before closing.
-    pub async fn shutdown(&mut self) -> Result<()> {
+    pub async fn close(&mut self) -> Result<()> {
         info!(node_id = %self.session.node.id, "Shutting down DeltaFabric");
 
         self.session

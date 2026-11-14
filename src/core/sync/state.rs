@@ -135,21 +135,25 @@ impl SyncState {
     }
 
     /// This node's anchor.
+    #[cfg(test)]
     pub fn anchor(&self) -> &[f32] {
         &self.anchor
     }
 
     /// Weighted sum of own and neighbor anchors.
+    #[cfg(test)]
     pub fn mix_sum(&self) -> &[f32] {
         &self.mix_sum
     }
 
     /// Sequence ID of the last delta this node sent.
+    #[cfg(test)]
     pub fn local_sequence(&self) -> u64 {
         self.local_sequence
     }
 
     /// Whether a resync is in progress (mixing is paused).
+    #[cfg(test)]
     pub fn is_resyncing(&self) -> bool {
         self.resync.is_some()
     }

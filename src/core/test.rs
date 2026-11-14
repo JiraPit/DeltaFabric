@@ -5,7 +5,8 @@ mod integration_tests {
     use crate::core::Config;
     use crate::core::codec::ValueEncoding;
     use crate::core::packet::{DeltaPacket, decode_packet, decode_snapshot, to_bytes};
-    use crate::core::sync::{MixingWeights, ReceiveOutcome, SyncState, metropolis_weights};
+    use crate::core::sync::state::ReceiveOutcome;
+    use crate::core::sync::{MixingWeights, SyncState, metropolis_weights};
     use std::collections::{HashMap, HashSet};
 
     struct Cluster {

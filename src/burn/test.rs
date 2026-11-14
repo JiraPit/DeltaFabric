@@ -124,7 +124,7 @@ mod burn_tests {
 
             let result_params = extract_params(&result);
             assert_eq!(result_params, original_params);
-            assert_eq!(fabric.session.stats().packets_sent, 0);
+            assert_eq!(fabric.stats().packets_sent, 0);
         });
     }
 
@@ -185,7 +185,7 @@ mod burn_tests {
             let model = fabric.step(model).await.unwrap();
             let _ = fabric.step(model).await.unwrap();
             assert_eq!(fabric.state.local_sequence(), 1);
-            assert_eq!(fabric.session.stats().packets_sent, 1);
+            assert_eq!(fabric.stats().packets_sent, 1);
         });
     }
 

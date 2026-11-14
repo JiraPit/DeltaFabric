@@ -73,7 +73,7 @@ for batch in dataset {
 }
 
 // Shutdown
-fabric.shutdown().await?;
+fabric.close().await?;
 ```
 
 ## Configuration Defaults

@@ -15,6 +15,7 @@ pub struct MixingWeights {
 
 impl MixingWeights {
     /// Weights for a node with no neighbors (mixing has no effect).
+    #[cfg(test)]
     pub fn isolated() -> Self {
         Self {
             self_weight: 1.0,

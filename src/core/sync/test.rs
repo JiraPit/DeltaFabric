@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod generate_tests {
     use crate::core::codec::{ValueEncoding, decode_delta};
-    use crate::core::sync::generate_local_delta;
+    use crate::core::sync::generate::generate_local_delta;
 
     const ALL: [ValueEncoding; 3] = [ValueEncoding::F32, ValueEncoding::Int8, ValueEncoding::Sign];
 
@@ -137,7 +137,7 @@ mod generate_tests {
 #[cfg(test)]
 mod mixing_tests {
     use crate::core::packet::SparseDelta;
-    use crate::core::sync::{MixingWeights, accumulate, metropolis_weights, mix};
+    use crate::core::sync::mixing::{MixingWeights, accumulate, metropolis_weights, mix};
     use std::collections::{HashMap, HashSet};
 
     fn graph(links: &[(u64, u64)]) -> HashMap<u64, HashSet<u64>> {
@@ -248,7 +248,8 @@ mod mixing_tests {
 mod state_tests {
     use crate::core::codec::{ValueEncoding, decode_delta, encode_delta};
     use crate::core::packet::{AnchorSnapshot, DeltaPacket, SparseDelta};
-    use crate::core::sync::{MixingWeights, ReceiveOutcome, SyncState, weights_hash};
+    use crate::core::sync::MixingWeights;
+    use crate::core::sync::state::{ReceiveOutcome, SyncState, weights_hash};
     use std::collections::HashMap;
 
     /// Node with two neighbors (2 and 3), equal weights of 1/3.

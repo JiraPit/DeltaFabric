@@ -23,22 +23,6 @@ use tracing::{info, warn};
 /// (resyncs, rejected packets, unstable gamma) and only Zenoh errors.
 const DEFAULT_LOG_FILTER: &str = "warn,zenoh=error";
 
-/// Installs a stderr logger for DeltaFabric with the given filter.
-///
-/// # Errors
-///
-/// Returns an error if the filter is invalid or logging is already initialized.
-fn install_logging(filter: &str) -> Result<()> {
-    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
-
-    let filter = EnvFilter::try_new(filter).context("Invalid log filter")?;
-    tracing_subscriber::registry()
-        .with(fmt::layer().with_writer(std::io::stderr))
-        .with(filter)
-        .try_init()
-        .map_err(|_| anyhow::anyhow!("Logging is already initialized"))
-}
-
 /// Enables DeltaFabric logging on stderr.
 ///
 /// Must be called before the first Fabric is created; otherwise the Fabric
@@ -52,9 +36,9 @@ fn install_logging(filter: &str) -> Result<()> {
 ///
 /// Raises RuntimeError if logging is already initialized or the filter is invalid.
 #[pyfunction]
-#[pyo3(signature = (level = "info"))]
-pub fn init_logging(level: &str) -> PyResult<()> {
-    install_logging(level).map_err(|e| exceptions::PyRuntimeError::new_err(format!("{:#}", e)))
+#[pyo3(name = "init_logging", signature = (level = "info"))]
+pub fn py_init_logging(level: &str) -> PyResult<()> {
+    crate::init_logging(level).map_err(|e| exceptions::PyRuntimeError::new_err(format!("{:#}", e)))
 }
 
 /// Configuration for DeltaFabric's weight synchronization protocol.
@@ -194,7 +178,7 @@ impl Fabric {
     fn init_sync(node_id: u64, config: CoreConfig) -> Result<Self> {
         // Make warnings visible unless the user already chose a logger.
         let filter = std::env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_LOG_FILTER.to_string());
-        let _ = install_logging(&filter);
+        let _ = crate::init_logging(&filter);
 
         info!(node_id = %node_id, "Initializing DeltaFabric (PyTorch)");
 

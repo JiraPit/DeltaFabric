@@ -2,9 +2,8 @@ pub mod generate;
 pub mod mixing;
 pub mod state;
 
-pub use generate::generate_local_delta;
-pub use mixing::{MixingWeights, accumulate, metropolis_weights, mix};
-pub use state::{ReceiveOutcome, SyncState, weights_hash};
+pub use mixing::{MixingWeights, metropolis_weights};
+pub use state::SyncState;
 
 #[cfg(test)]
 mod test;
