@@ -45,7 +45,7 @@ Heavier compression needs a smaller `gamma`: keep `gamma <= 2 * delta_selection_
 All nodes must start from identical weights (use the same seed) and call `fabric.step(model)` once before training, so each node records those weights as its starting anchor. W_mix is only correct if every delta arrives exactly once. Deltas carry consecutive sequence numbers; a gap (or a node that started from different weights) triggers a resync, where the node requests its neighbors' full anchors once and rebuilds W_mix.
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/JiraPit/DeltaFabric/main/visualization/example_flow_2.svg" width="75%" alt="Resync Flow">
+  <img src="https://raw.githubusercontent.com/JiraPit/DeltaFabric/main/visualization/example_resync_flow.svg" width="75%" alt="Resync Flow">
 </div>
 
 ## Quick Start
