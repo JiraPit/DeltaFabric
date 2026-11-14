@@ -54,7 +54,7 @@ DF_NODE_ID=3 DF_PEERS=1,2 cargo run -p mnist_distributed_3
 ```rust
 use delta_fabric::{Config, Fabric};
 
-// Create a fabric. This waits for other modules to be ready.
+// Create a fabric. This waits for the other nodes to be ready.
 let config = Config::new(peers);
 let mut fabric = Fabric::new(node_id, config).await?;
 

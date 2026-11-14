@@ -4,10 +4,15 @@ Distributed MNIST training demonstrating DeltaFabric's weight synchronization pr
 
 ## Prerequisites
 
-Build and install the DeltaFabric Python extension:
+Install DeltaFabric:
 
 ```bash
-cd ../../DeltaFabric
+pip install delta_fabric
+```
+
+Or build it from this repository (from the repository root):
+
+```bash
 maturin develop --features pytorch
 ```
 
@@ -59,7 +64,7 @@ DF_NODE_ID=3 DF_PEERS=1,2 python mnist_distributed_3.py
 ```python
 from delta_fabric import Fabric, Config
 
-# 1. Create a fabric. This waits for other modules to be ready.
+# 1. Create a fabric. This waits for the other nodes to be ready.
 config = Config(peers=[2, 3])
 fabric = Fabric(node_id=1, config=config)
 
